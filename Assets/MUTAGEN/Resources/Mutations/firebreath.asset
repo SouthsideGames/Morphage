@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cb937008fe5244c7aba93a1ff4d29102, type: 3}
+  m_Name: firebreath
+  m_EditorClassIdentifier: Assembly-CSharp::Mutagen.MutationDef
+  id: firebreath
+  order: 0
+  displayName: Fire Breath
+  color: {r: 1, g: 0.5411765, b: 0.23529412, a: 1}
+  rarity: rare
+  move: firebreath
+  active: 0
+  repeatable: 1
+  maxStacks: 3
+  description: 'MOVE: cone of flame ahead. Burns. Synergy w/ Venom: hits poisoned
+    foes harder.'
+  evolveName: "Wildfire \u2014 a wider, fiercer cone"
+  icon: {fileID: 0}

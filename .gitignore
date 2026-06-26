@@ -6,6 +6,11 @@
 # See: https://github.com/github/gitignore/tree/main/Global
 #
 .utmp/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
 /[Ll]ibrary/
 /[Tt]emp/
 /[Oo]bj/
