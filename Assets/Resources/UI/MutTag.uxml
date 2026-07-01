@@ -1,0 +1,9 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- One owned-mutation chip (HUD). Cloned per mutation by UIManager.RenderMuts.
+         Bound by class: mtdot (colour dot), mtname (label), star (shown only when evolved). -->
+    <ui:VisualElement name="mtag" class="mtag">
+        <ui:VisualElement name="mtdot" class="mtdot"/>
+        <ui:Label name="mtname" class="mtname"/>
+        <ui:Label name="mtstar" class="star" text="★"/>
+    </ui:VisualElement>
+</ui:UXML>

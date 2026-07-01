@@ -1,0 +1,233 @@
+:root {
+    --bg: rgb(7, 17, 15);
+    --abyss: rgb(11, 26, 24);
+    --dna: rgb(95, 245, 176);
+    --mut: rgb(255, 61, 154);
+    --xp: rgb(124, 240, 196);
+    --hp: rgb(255, 90, 110);
+    --ink: rgb(223, 245, 238);
+    --muted: rgb(158, 188, 178);
+    --line: rgba(95, 245, 176, 0.38);
+    --panel: rgba(6, 16, 14, 0.94);
+}
+
+.root { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+
+/* ---------- HUD ---------- */
+.hud { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+.topbar { position: absolute; top: 0; left: 0; right: 0; flex-direction: row; justify-content: space-between; padding: 14px 16px; }
+.stat-block { flex-direction: column; }
+.barrow { flex-direction: row; align-items: center; margin-bottom: 7px; }
+.label { font-size: 10px; letter-spacing: 2px; color: var(--muted); -unity-font-style: bold; }
+.barlabel { width: 26px; }
+.bar { width: 170px; height: 11px; background-color: rgba(255,255,255,0.06); border-width: 1px; border-color: var(--line); border-radius: 6px; overflow: hidden; }
+.fill { position: absolute; top: 0; left: 0; bottom: 0; width: 100%; }
+.fill.hp { background-color: var(--hp); }
+.fill.xp { background-color: var(--dna); }
+.bartxt { position: absolute; top: 0; left: 0; right: 0; bottom: 0; font-size: 9px; color: rgb(6,20,15); -unity-font-style: bold; -unity-text-align: middle-center; }
+
+.pills { flex-direction: column; align-items: flex-end; margin-right: 48px; }
+.pill { flex-direction: row; align-items: center; margin-bottom: 6px; }
+.k { font-size: 9px; letter-spacing: 2px; color: var(--muted); -unity-font-style: bold; margin-right: 8px; }
+.pillval { font-size: 20px; color: var(--ink); -unity-font-style: bold; }
+.pillval.dna { font-size: 15px; color: var(--dna); }
+
+.muts { position: absolute; left: 16px; bottom: 14px; flex-direction: row; flex-wrap: wrap; max-width: 60%; }
+.mtag { flex-direction: row; align-items: center; background-color: rgba(255,61,154,0.10); border-width: 1px; border-color: rgba(255,61,154,0.35); color: rgb(255,208,230); font-size: 11px; padding: 4px 9px; border-radius: 20px; margin-right: 6px; margin-bottom: 6px; }
+.mtdot { width: 8px; height: 8px; margin-right: 6px; border-radius: 4px; }
+
+.hint { position: absolute; right: 16px; bottom: 14px; font-size: 11px; color: var(--muted); -unity-text-align: middle-right; }
+
+/* bigger, thumb-readable HUD on touch devices */
+.hud.touch .hint { display: none; }
+.hud.touch .topbar { padding: 22px 26px; }
+.hud.touch .barrow { margin-bottom: 12px; }
+.hud.touch .barlabel { width: 34px; }
+.hud.touch .label { font-size: 14px; }
+.hud.touch .bar { width: 190px; height: 16px; border-radius: 8px; }
+.hud.touch .bartxt { font-size: 11px; }
+.hud.touch .k { font-size: 15px; }
+.hud.touch .pillval { font-size: 34px; }
+.hud.touch .pillval.dna { font-size: 26px; }
+
+/* ---------- overlays ---------- */
+.overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; align-items: center; justify-content: center; background-color: rgba(7,17,15,0.94); }
+/* overlay content scrolls on small screens; min-height keeps it centered when it fits */
+.oscroll { width: 100%; height: 100%; }
+.oscroll .unity-scroll-view__content-container { min-height: 100%; align-items: center; justify-content: center; padding: 18px 12px; }
+.oscroll .unity-scroll-view__content-viewport { flex-grow: 1; }
+
+/* mobile: a compact, width-filling draft that keeps title + cards + Reroll inside the safe area.
+   Cards flex to share the row width (less empty space) and shrink to fit the shorter landscape height. */
+.mobile .eyebrow { font-size: 11px; margin-bottom: 4px; }
+.mobile .big { font-size: 34px; margin-bottom: 6px; }
+.mobile .cards { width: 100%; max-width: 980px; }
+.mobile .card { flex: 1 1 0; width: auto; max-width: 300px; min-height: 0; padding: 14px 14px; margin: 0 6px; }
+.mobile .card .glyph { width: 46px; height: 46px; margin-bottom: 8px; }
+.mobile .cardname { font-size: 15px; margin-bottom: 4px; }
+.mobile .carddesc { font-size: 10px; }
+.mobile .reroll { margin-top: 10px; }
+.mobile .big.menutitle { font-size: 44px; } /* keep the main-menu title prominent */
+
+/* mobile: move the LVL/WAVE/DNA readout to the top-centre, clear of the right-side action buttons */
+.mobile .pills { position: absolute; top: 4px; left: 0; right: 0; flex-direction: row; justify-content: center; align-items: flex-start; margin-right: 0; }
+.mobile .pill { flex-direction: row; align-items: center; margin: 0 12px; margin-bottom: 0; }
+.eyebrow { font-size: 13px; letter-spacing: 7px; color: var(--mut); -unity-font-style: bold; margin-bottom: 8px; }
+.big { font-size: 46px; -unity-font-style: bold; color: var(--ink); margin-bottom: 10px; -unity-text-align: middle-center; }
+.sub { font-size: 15px; color: var(--muted); -unity-text-align: middle-center; max-width: 480px; white-space: normal; margin-bottom: 4px; }
+
+/* ---------- draft cards ---------- */
+.cards { flex-direction: row; justify-content: center; }
+.card { width: 208px; min-height: 264px; background-color: rgba(14,33,29,0.95); border-width: 1px; border-color: var(--line); border-radius: 14px; padding: 20px 18px; margin: 0 9px; }
+.card:hover { border-color: var(--mut); }
+.card .cardtop { height: 3px; }
+.card .glyph { width: 60px; height: 60px; flex-shrink: 0; -unity-background-scale-mode: scale-to-fit; border-radius: 12px; margin-bottom: 12px; }
+.cardname { font-size: 17px; -unity-font-style: bold; color: var(--ink); margin-bottom: 8px; }
+.carddesc { font-size: 11px; color: rgb(169,199,189); white-space: normal; flex-grow: 1; }
+.cardkey { font-size: 10px; color: var(--muted); margin-bottom: 6px; }
+.cardstk { font-size: 10px; margin-top: 8px; }
+
+/* ---------- buttons ---------- */
+.btn { font-size: 14px; letter-spacing: 2px; -unity-font-style: bold; color: rgb(6,20,15); background-color: var(--dna); border-width: 0; padding: 15px 36px; border-radius: 30px; margin: 8px; }
+.btn:hover { background-color: var(--xp); }
+.btn.ghost { background-color: rgba(0,0,0,0); border-width: 1px; border-color: var(--line); color: var(--ink); }
+.btnrow { flex-direction: row; justify-content: center; margin-top: 18px; }
+
+/* ---------- death stats ---------- */
+.deathstats { flex-direction: row; flex-wrap: wrap; justify-content: center; max-width: 520px; margin-bottom: 14px; }
+.dstat { width: 150px; align-items: center; margin: 9px 0; }
+.dval { font-size: 26px; -unity-font-style: bold; color: var(--ink); }
+.dkey { font-size: 9px; letter-spacing: 2px; color: var(--muted); -unity-font-style: bold; }
+.seedline { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+/* ---------- menu ---------- */
+.menutitle { font-size: 54px; margin-bottom: 6px; }
+.menucard { width: 600px; max-width: 94%; align-items: center;
+    background-color: rgba(10,24,21,0.72); border-width: 1px; border-color: var(--line);
+    border-radius: 18px; padding: 20px 30px; margin-top: 8px; }
+.field { width: 100%; margin: 10px 0 4px 0; }
+.seedinput { font-size: 15px; margin-top: 6px; }
+.seedinput .unity-text-field__input { min-height: 40px; padding: 0 14px; border-radius: 10px;
+    background-color: rgba(255,255,255,0.05); border-color: var(--line); }
+.togglerow { flex-direction: row; flex-wrap: wrap; justify-content: center; margin: 8px 0; }
+.toggle { font-size: 13px; color: var(--muted); background-color: rgba(255,255,255,0.05);
+    border-width: 1px; border-color: var(--line); border-radius: 24px; padding: 10px 18px; margin: 5px; }
+.toggle.on { color: var(--dna); border-color: var(--dna); }
+.ver { font-size: 10px; letter-spacing: 3px; color: var(--muted); opacity: 0.5; margin-top: 10px; }
+
+/* ---------- debug ---------- */
+.debug { position: absolute; right: 10px; top: 64px; width: 210px; background-color: var(--panel); border-width: 1px; border-color: var(--line); border-radius: 10px; padding: 10px; }
+.dbgtitle { font-size: 9px; letter-spacing: 2px; color: var(--mut); -unity-font-style: bold; margin-bottom: 6px; }
+.dbginfo { font-size: 10px; color: rgb(158,201,189); white-space: normal; margin-bottom: 6px; }
+.dbggrid { flex-direction: row; flex-wrap: wrap; }
+.dbggrid Button { width: 92px; font-size: 9px; color: var(--ink); background-color: rgba(255,255,255,0.05); border-width: 1px; border-color: var(--line); border-radius: 5px; padding: 5px 4px; margin: 2px; }
+.dbggrid Button:hover { border-color: var(--dna); color: var(--dna); }
+
+/* ---------- v0.3: banner, cooldowns, reroll, rarity, synergy ---------- */
+.banner { position: absolute; top: 34%; left: 0; right: 0; -unity-text-align: middle-center; white-space: normal;
+    font-size: 40px; -unity-font-style: bold; color: var(--dna); display: none; }
+.cdrow { position: absolute; bottom: 10px; left: 0; right: 0; flex-direction: row; justify-content: center; }
+.cd { font-size: 11px; letter-spacing: 1px; -unity-font-style: bold; color: var(--muted);
+    background-color: rgba(255,255,255,0.06); border-width: 1px; border-color: var(--line);
+    border-radius: 14px; padding: 6px 14px; margin: 0 6px; }
+.cd.ready { border-color: var(--dna); color: var(--dna); }
+.reroll { margin-top: 16px; }
+.reroll.dim { opacity: 0.4; }
+.rar { font-size: 9px; letter-spacing: 2px; -unity-font-style: bold; -unity-text-align: upper-right; margin-bottom: 2px; }
+.synwrap { flex-direction: row; flex-wrap: wrap; width: 100%; margin-top: 2px; }
+.syn { font-size: 10px; color: var(--xp); background-color: rgba(124,240,196,0.12);
+    border-radius: 10px; padding: 2px 8px; margin-right: 4px; margin-top: 2px; }
+
+/* ---------- synergy codex ---------- */
+.codexlist { flex-direction: column; width: 560px; max-width: 92%; margin-top: 6px; margin-bottom: 14px; }
+.codexrow { background-color: rgba(10,24,21,0.6); border-width: 1px; border-color: var(--line); border-radius: 10px; padding: 9px 12px; margin-bottom: 8px; }
+.codexrow.active { border-color: var(--dna); background-color: rgba(95,245,176,0.10); }
+.codexhead { flex-direction: row; justify-content: space-between; align-items: center; }
+.synname { font-size: 15px; color: var(--ink); -unity-font-style: bold; }
+.syncat { font-size: 9px; letter-spacing: 2px; color: var(--mut); -unity-font-style: bold; }
+.synrecipe { font-size: 12px; color: var(--dna); margin-top: 3px; white-space: normal; }
+.syneffect { font-size: 12px; color: var(--muted); margin-top: 1px; white-space: normal; }
+
+/* ---------- monster archive ---------- */
+.gallerylist { flex-direction: column; width: 560px; max-width: 92%; margin-top: 6px; margin-bottom: 14px; }
+.gcard { flex-direction: row; align-items: center; background-color: rgba(10,24,21,0.6); border-width: 1px; border-color: var(--line); border-radius: 12px; padding: 10px; margin-bottom: 8px; }
+.gcard.won { border-color: var(--dna); }
+.gpic { width: 88px; height: 88px; border-radius: 10px; background-color: rgba(0,0,0,0.35); margin-right: 12px; -unity-background-scale-mode: scale-to-fit; }
+.ginfo { flex-direction: column; flex-grow: 1; }
+.gname { font-size: 16px; color: var(--ink); -unity-font-style: bold; }
+.goutcome { font-size: 11px; color: var(--muted); margin-top: 2px; -unity-font-style: bold; }
+.goutcome.won { color: var(--dna); }
+.gstat { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.gmut { font-size: 11px; color: var(--xp); margin-top: 3px; white-space: normal; }
+.mtag.evolved { background-color: rgba(255,210,74,0.12); border-color: rgba(255,210,74,0.5); color: rgb(255,233,176); }
+.star { color: rgb(255,210,74); margin-left: 4px; }
+.cardrar { font-size: 9px; letter-spacing: 2px; -unity-font-style: bold; }
+
+/* ---------- v0.4: move bar, forget overlay, move/mod tags ---------- */
+.movebar { position: absolute; bottom: 10px; left: 0; right: 0; flex-direction: row; justify-content: center; }
+.mslot { width: 62px; height: 58px; margin: 0 5px; background-color: rgba(20,42,37,0.95);
+    border-width: 1px; border-color: rgba(95,245,176,0.5); border-radius: 10px; align-items: center; justify-content: center; overflow: hidden; }
+.mslot.empty { opacity: 0.4; }
+.mslot.dash { border-color: rgba(124,240,196,0.4); }
+.mk { position: absolute; top: 3px; left: 5px; font-size: 9px; color: var(--muted); }
+.ml { position: absolute; top: 3px; right: 5px; font-size: 9px; -unity-font-style: bold; color: var(--dna); }
+.mn { font-size: 13px; -unity-font-style: bold; -unity-text-align: middle-center; }
+.mglyph { width: 30px; height: 30px; -unity-background-scale-mode: scale-to-fit; }
+.mcool { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background-color: rgba(0,0,0,0.55); }
+
+.replaceslots { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+.rslot { width: 210px; background-color: rgba(14,33,29,0.95); border-width: 1px; border-color: var(--line);
+    border-radius: 12px; padding: 16px; margin: 8px; }
+.rslot:hover { border-color: var(--mut); }
+.rslot.discard { border-color: rgba(255,90,110,0.5); }
+.rkey { font-size: 10px; color: var(--muted); }
+.rname { font-size: 16px; -unity-font-style: bold; margin-top: 6px; margin-bottom: 6px; }
+.rlevel { font-size: 10px; color: rgb(169,199,189); white-space: normal; }
+
+.tag { font-size: 8px; letter-spacing: 1px; -unity-font-style: bold; padding: 2px 7px; border-radius: 8px; margin-bottom: 4px; }
+.tagmove { background-color: rgba(255,210,74,0.18); color: rgb(255,210,74); }
+.tagmod { background-color: rgba(124,240,196,0.15); color: var(--xp); }
+
+/* ---------- pause ---------- */
+.pausebtn { position: absolute; top: 12px; right: 14px; width: 44px; height: 44px;
+    font-size: 13px; -unity-font-style: bold; color: var(--ink); background-color: rgba(6,16,14,0.75);
+    border-width: 1px; border-color: var(--line); border-radius: 10px; display: none; }
+.pausebtn:hover { border-color: var(--dna); }
+
+/* ---------- touch controls (mobile) ---------- */
+.touchlayer { position: absolute; left: 0; top: 0; bottom: 0; width: 50%; display: none; }
+.joybase { position: absolute; width: 150px; height: 150px; border-radius: 75px; display: none;
+    border-width: 2px; border-color: rgba(95,245,176,0.4); background-color: rgba(95,245,176,0.06); }
+.joyknob { position: absolute; width: 62px; height: 62px; border-radius: 31px; left: 44px; top: 44px;
+    background-color: rgba(95,245,176,0.5); }
+/* on touch devices: the 4 move buttons form a diamond on the right, dash sits below.
+   joystick lives on the left half (.touchlayer), so move controls stay clear of it. */
+.movebar.touch {
+    left: auto; right: 34px; bottom: auto; top: 50%;
+    translate: 0 -54%;            /* nudged up so the dash button fits below the diamond */
+    width: 232px; height: 232px;
+    padding: 0; justify-content: flex-start;
+}
+.movebar.touch .mslot { position: absolute; width: 76px; height: 72px; margin: 0; }
+.movebar.touch .mglyph { width: 44px; height: 44px; }
+/* diamond: [1] top · [2] left · [3] right · [4] bottom */
+.movebar.touch .mpos0 { top: 0;     left: 78px; }
+.movebar.touch .mpos1 { top: 80px;  left: 0; }
+.movebar.touch .mpos2 { top: 80px;  left: 156px; }
+.movebar.touch .mpos3 { top: 160px; left: 78px; }
+/* dash on its own, centered just below the cluster */
+.movebar.touch .dash  { top: 240px; left: 78px; }
+
+/* ---------- settings (audio + keybinds) ---------- */
+.settingsbox { width: 560px; max-width: 92%; align-items: stretch; background-color: rgba(10,24,21,0.72);
+    border-width: 1px; border-color: var(--line); border-radius: 18px; padding: 28px; margin-top: 14px; }
+.srow { flex-direction: row; align-items: center; margin-bottom: 10px; }
+.slabel { font-size: 12px; letter-spacing: 1px; color: var(--muted); -unity-font-style: bold; margin-top: 6px; margin-bottom: 6px; }
+.srow .slabel { width: 80px; margin-top: 0; margin-bottom: 0; }
+.sslider { flex-grow: 1; }
+.bindlist { flex-direction: row; flex-wrap: wrap; margin-top: 6px; margin-bottom: 6px; }
+.bindrow { width: 50%; flex-direction: row; justify-content: space-between; align-items: center; padding: 3px 8px; }
+.bl { font-size: 11px; color: var(--ink); }
+.bindkey { font-size: 11px; -unity-font-style: bold; color: var(--dna); background-color: rgba(255,255,255,0.05);
+    border-width: 1px; border-color: var(--line); border-radius: 6px; padding: 4px 10px; min-width: 56px; -unity-text-align: middle-center; }
+.bindkey.listening { border-color: var(--mut); color: var(--mut); }

@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cb937008fe5244c7aba93a1ff4d29102, type: 3}
+  m_Name: frost
+  m_EditorClassIdentifier: Assembly-CSharp::Mutagen.MutationDef
+  id: frost
+  order: 23
+  displayName: Frost Breath
+  color: {r: 0.2901961, g: 0.8392157, b: 1, a: 1}
+  rarity: rare
+  move: frost
+  active: 0
+  repeatable: 1
+  maxStacks: 3
+  description: 'MOVE: a chilling cone that damages and slows.'
+  evolveName: "Permafrost \u2014 a wider, deeper freeze"
+  icon: {fileID: 0}

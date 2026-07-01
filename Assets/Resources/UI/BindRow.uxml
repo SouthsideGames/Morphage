@@ -1,0 +1,8 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- One keybind row (Settings). Cloned per binding by UIManager.RenderBinds.
+         Bound by class: bl (action label), bindkey (the rebind button). -->
+    <ui:VisualElement name="bindrow" class="bindrow">
+        <ui:Label name="bl" class="bl"/>
+        <ui:Button name="bindkey" class="bindkey"/>
+    </ui:VisualElement>
+</ui:UXML>

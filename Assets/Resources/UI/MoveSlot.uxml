@@ -1,0 +1,11 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- One move-bar slot. Cloned per slot by UIManager.BuildMoveBar; edit layout/structure here in UI Builder.
+         Children are bound by class name (mk/ml/mglyph/mn/mcool) — keep those classes. -->
+    <ui:VisualElement name="mslot" class="mslot">
+        <ui:Label name="mk" class="mk"/>
+        <ui:Label name="ml" class="ml"/>
+        <ui:VisualElement name="mglyph" class="mglyph" picking-mode="Ignore"/>
+        <ui:Label name="mn" class="mn" text="—"/>
+        <ui:VisualElement name="mcool" class="mcool"/>
+    </ui:VisualElement>
+</ui:UXML>

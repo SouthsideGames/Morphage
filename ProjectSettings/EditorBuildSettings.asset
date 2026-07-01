@@ -30,7 +30,7 @@ EditorBuildSettings:
     path: Assets/Suriyun/MobileControllerSystem/Examples/ExampleKevin.unity
     guid: 288002f1be4cf1248a93e85d8ab0548c
   - enabled: 1
-    path: Assets/Scenes/SampleScene.unity
+    path: Assets/Scenes/Game.unity
     guid: 8c9cfa26abfee488c85f1582747f6a02
   m_configObjects: {}
   m_UseUCBPForAssetBundles: 0

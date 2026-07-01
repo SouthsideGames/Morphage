@@ -1,0 +1,10 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- One slot in the "loadout full, replace a move?" overlay. Cloned by UIManager.ShowReplace.
+         Bound by class: rkey (shortcut), rname (move name), rlevel (detail line).
+         The discard option gets an extra "discard" class at runtime. -->
+    <ui:VisualElement name="rslot" class="rslot">
+        <ui:Label name="rkey" class="rkey"/>
+        <ui:Label name="rname" class="rname"/>
+        <ui:Label name="rlevel" class="rlevel"/>
+    </ui:VisualElement>
+</ui:UXML>

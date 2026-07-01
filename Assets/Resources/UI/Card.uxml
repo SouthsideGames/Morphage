@@ -1,0 +1,15 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <!-- One mutation-draft card. Cloned per option by UIManager.ShowDraft; edit layout/structure here in
+         UI Builder. Children are bound by class name (cardtop/cardrar/tag/glyph/cardkey/cardname/carddesc/
+         cardstk) — keep those classes. Text/colours/icon are filled in at runtime. -->
+    <ui:VisualElement name="card" class="card">
+        <ui:VisualElement name="cardtop" class="cardtop"/>
+        <ui:Label name="cardrar" class="cardrar"/>
+        <ui:Label name="cardtag" class="tag"/>
+        <ui:VisualElement name="cardglyph" class="glyph"/>
+        <ui:Label name="cardkey" class="cardkey"/>
+        <ui:Label name="cardname" class="cardname"/>
+        <ui:Label name="carddesc" class="carddesc"/>
+        <ui:Label name="cardstk" class="cardstk"/>
+    </ui:VisualElement>
+</ui:UXML>
