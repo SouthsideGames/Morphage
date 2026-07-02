@@ -12,13 +12,14 @@ namespace Mutagen
         public float x, y, r, dps, life, pull, slowMul;
         public bool poison, dead;
         public Color color;
+        public Player owner; // the player who dropped this zone — so its ticks credit crit/synergy/lifesteal to them
         public SpriteView view;
         float _tick;
 
-        public Hazard Set(float x, float y, float r, float dps, float life, float pull, float slowMul, bool poison, Color color)
+        public Hazard Set(float x, float y, float r, float dps, float life, float pull, float slowMul, bool poison, Color color, Player owner = null)
         {
             this.x = x; this.y = y; this.r = r; this.dps = dps; this.life = life;
-            this.pull = pull; this.slowMul = slowMul; this.poison = poison; this.color = color;
+            this.pull = pull; this.slowMul = slowMul; this.poison = poison; this.color = color; this.owner = owner;
             dead = false; _tick = 0f;
             return this;
         }
@@ -43,7 +44,7 @@ namespace Mutagen
                 }
                 if (hit)
                 {
-                    e.Hurt(dps * 0.25f, game, 0f, 0f, true); // silent: no per-tick floater/Sfx spam
+                    e.Hurt(dps * 0.25f, game, owner, 0f, 0f, true); // silent: no per-tick floater/Sfx spam
                     if (poison) e.ApplyPoison(dps);
                     if (slowMul < 1f) e.ApplySlow(slowMul, 0.4f);
                 }

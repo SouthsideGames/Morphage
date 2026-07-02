@@ -25,7 +25,9 @@ namespace Mutagen
         public float w = 960f, h = 600f;
 
         public GameState state = GameState.Menu;
-        public Player player;
+        public readonly Player[] players = new Player[2];
+        public int localIndex = 0;                    // which hero this device drives (host = 0)
+        public Player player => players[localIndex];  // the local hero — keeps existing UI/code working
         public readonly List<Enemy> enemies = new();
         public readonly List<Projectile> projectiles = new();
         public readonly List<DNAOrb> orbs = new();
@@ -53,6 +55,7 @@ namespace Mutagen
 
         // v0.3 / v0.4
         public bool endless, autocast;
+        public bool coop; // co-op game mode: spawn a second hero (a bot for now). Off = normal single-player.
         public int rerolls = 3;
         public Banner? banner;
         MutationDef _pendingReplace;
@@ -73,6 +76,7 @@ namespace Mutagen
         Pool<BeamView> _beamPool;
 
         public static float ParticleScale = 1f; // <1 on mobile: fraction of cosmetic particles actually spawned
+        public static float ParticleBase = 1f;  // platform baseline before the Reduced-Effects setting
         readonly Stack<Particle> _freeParticles = new();
         readonly Stack<Floater> _freeFloaters = new();
         readonly Stack<Projectile> _freeProjectiles = new();
@@ -94,9 +98,21 @@ namespace Mutagen
         readonly bool[] _moveQueued = new bool[4];
         bool _dashQueued;
         float _accum;
+        // co-op lockstep state
+        readonly Net.TickInput[] _stepInput = new Net.TickInput[2];        // this tick's input per hero (index 0/1)
+        readonly Dictionary<int, Net.TickInput> _localBuf = new();         // our sent inputs, keyed by tick (for redundancy)
+        readonly List<Net.TickInput> _sendBatch = new();                   // reused scratch for a redundant send
+        int _execTick, _stallFrames;
+        byte _pendingDraftByte;      // co-op: the local hero's queued upgrade pick, sent with the next input
+        const int InputDelay = 4;   // ticks of input pipeline (hides ~66ms of latency)
+        const int Redundancy = 12;  // recent inputs repeated in each packet (survives dropped packets)
+        readonly Dictionary<int, ulong> _localChecksums = new(); // co-op: our state hash at checksum ticks
+        int _nextCompareTick;
+        bool _desynced;
+        const int ChecksumInterval = 30; // hash + compare full state every 30 ticks (~0.5s)
         Transform _viewRoot;
         Camera _cam;
-        PlayerVisual _playerVisual;
+        PlayerVisual[] _playerVisuals;
         Juice _juice;
 
         // ---------------------------------------------------------------- setup
@@ -105,7 +121,8 @@ namespace Mutagen
             // Mobile perf/UX: drive a steady 60 (mobile often defaults to 30) and keep the screen awake in-game.
             Application.targetFrameRate = 60;
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
-            ParticleScale = TouchInput.IsTouchDevice ? 0.55f : 1f; // thin out cosmetic particles on phones
+            ParticleBase = TouchInput.IsTouchDevice ? 0.55f : 1f; // thin out cosmetic particles on phones
+            ParticleScale = ParticleBase;                          // GameSettings.Load() applies the Reduced-Effects setting
 
             // Fit the bounded arena to the device aspect so the dish fills the screen (no letterbox bands).
             float aspect = (float)Screen.width / Mathf.Max(1, Screen.height);
@@ -133,7 +150,8 @@ namespace Mutagen
             _particlePool = new Pool<ParticleView>(() => SpriteFactory.CreateParticleView(_viewRoot), 256);
             _labelPool = new Pool<LabelView>(() => SpriteFactory.CreateLabel(_viewRoot), 16);
             _beamPool = new Pool<BeamView>(() => SpriteFactory.CreateBeam(_viewRoot), 4);
-            _playerVisual = PlayerVisual.Create(_viewRoot);
+            _playerVisuals = new PlayerVisual[2];
+            for (int i = 0; i < 2; i++) _playerVisuals[i] = PlayerVisual.Create(_viewRoot);
 
             SetupCamera();
             SetupFloor();
@@ -142,6 +160,7 @@ namespace Mutagen
             var sfxSrc = gameObject.AddComponent<AudioSource>();
             var musicSrc = gameObject.AddComponent<AudioSource>();
             Sfx.Init(sfxSrc, musicSrc);
+            GameSettings.Load();
 
             ui = new UIManager(this);
             ui.ShowStart();
@@ -182,7 +201,7 @@ namespace Mutagen
         {
             bool touch = ui != null && TouchInput.IsTouchDevice && state == GameState.Playing && !_paused;
             TouchInput.Active = touch;
-            if (ui != null) { ui.SetTouchActive(touch); ui.SetPauseVisible(state == GameState.Playing); }
+            if (ui != null) { ui.SetTouchActive(touch); ui.SetPauseVisible(state == GameState.Playing && !coop); }
 
             _input.Poll();
             Sfx.Tick(Time.deltaTime);
@@ -221,10 +240,13 @@ namespace Mutagen
 
             Tick();
             Render();
-            if (player != null) ui.SyncHud();
-            ui.UpdateBanner();
-            ui.UpdateMoveBar();
-            ui.UpdateDebug();
+            if (ui != null)
+            {
+                if (player != null) ui.SyncHud();
+                ui.UpdateBanner();
+                ui.UpdateMoveBar();
+                ui.UpdateDebug();
+            }
         }
 
         void Tick()
@@ -239,8 +261,43 @@ namespace Mutagen
 
             _accum += scaled;
             int guard = 0;
-            while (_accum >= FIXED && guard++ < 8) { Step(FIXED); _accum -= FIXED; }
-            if (_accum > FIXED) _accum = 0f; // drop backlog rather than spiral
+            if (Net.CoopNet.Connected)
+            {
+                int start = _execTick;
+                while (_accum >= FIXED && guard++ < 8)
+                {
+                    if (!Net.CoopSync.TryGetRemote(_execTick, out var remoteIn)) break; // stall: partner input not here yet
+                    if (!_localBuf.TryGetValue(_execTick, out var localIn)) break;       // safety (always primed/sampled)
+                    // sample local input for a future tick (pipelined) and broadcast it redundantly
+                    SampleAndSend(_execTick + InputDelay, _input.MoveVec,
+                        _moveQueued[0], _moveQueued[1], _moveQueued[2], _moveQueued[3], _dashQueued, _pendingDraftByte);
+                    for (int s = 0; s < 4; s++) _moveQueued[s] = false;
+                    _dashQueued = false; _pendingDraftByte = 0;
+                    // assign this tick's inputs by hero index (identical on both peers), then step
+                    _stepInput[localIndex] = localIn;
+                    _stepInput[1 - localIndex] = remoteIn;
+                    Step(FIXED);
+                    if (_execTick % ChecksumInterval == 0) { ulong h = Checksum(); _localChecksums[_execTick] = h; Net.CoopSync.SendChecksum(_execTick, h); }
+                    Net.CoopSync.RemoveRemote(_execTick);
+                    _localBuf.Remove(_execTick - InputDelay - Redundancy);
+                    _execTick++;
+                    _accum -= FIXED;
+                }
+                if (_execTick == start && _accum >= FIXED)   // didn't advance = stalled on the partner
+                {
+                    ResendRecent();
+                    if (++_stallFrames == 90)
+                        Debug.LogWarning($"[MUTAGEN][net] stalled at tick {_execTick} (~1.5s) — waiting for partner (lag/packet loss)");
+                }
+                else _stallFrames = 0;
+                if (_accum > FIXED * 30f) _accum = FIXED * 30f; // cap catch-up backlog
+                CompareChecksums();
+            }
+            else
+            {
+                while (_accum >= FIXED && guard++ < 8) { Step(FIXED); _accum -= FIXED; }
+                if (_accum > FIXED) _accum = 0f; // drop backlog rather than spiral
+            }
         }
 
         void Step(float dt)
@@ -248,9 +305,37 @@ namespace Mutagen
             stats.time += dt;
             grid.Rebuild(enemies);               // for player/clone nearestEnemy this step
 
-            player.Update(dt, this, _input.MoveVec);
-            for (int s = 0; s < 4; s++) if (_moveQueued[s]) { player.UseMove(s, this); _moveQueued[s] = false; }
-            if (_dashQueued) { player.Dash(this); _dashQueued = false; }
+            // Per-hero update in fixed index order (deterministic). Networked: both heroes run from this
+            // tick's pre-assigned inputs (_stepInput, set in Tick) — identical on both peers. Solo: local
+            // input drives the local hero, bot AI drives the other.
+            if (Net.CoopNet.Connected)
+            {
+                for (int i = 0; i < players.Length; i++)
+                {
+                    var p = players[i];
+                    if (p == null || !p.alive) continue;
+                    if (p.pendingDrafts > 0) p.invuln = Mathf.Max(p.invuln, 0.25f); // stay shielded the whole time you're choosing
+                    var inp = _stepInput[i];
+                    if (inp.draft != 0) ApplyCoopDraft(p, inp.draft);   // upgrade pick — same tick on both peers
+                    p.Update(dt, this, inp.MoveVec);
+                    for (int s = 0; s < 4; s++) if (inp.Move(s)) p.UseMove(s, this);
+                    if (inp.Dash) p.Dash(this);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < players.Length; i++)
+                {
+                    var p = players[i];
+                    if (p == null || !p.alive) continue;
+                    if (p.isBot) { p.Update(dt, this, BotMove(p)); continue; }
+                    p.Update(dt, this, _input.MoveVec);
+                    for (int s = 0; s < 4; s++) if (_moveQueued[s]) { p.UseMove(s, this); _moveQueued[s] = false; }
+                    if (_dashQueued) { p.Dash(this); _dashQueued = false; }
+                }
+                for (int s = 0; s < 4; s++) _moveQueued[s] = false; // drop any input not consumed (e.g. local hero down)
+                _dashQueued = false;
+            }
 
             UpdateWaves(dt);
 
@@ -266,10 +351,11 @@ namespace Mutagen
             for (int i = 0; i < orbs.Count; i++)
             {
                 var o = orbs[i];
-                o.Update(dt, player);
+                o.Update(dt, this);
                 if (o.dead)
                 {
-                    player.AddXp(o.value, this); Sfx.Pickup();
+                    if (o.collector != null) o.collector.AddXp(o.value, this);
+                    Sfx.Pickup();
                     AddParticle(o.x, o.y, 0f, 40f, .4f, Palette.Dna, 4f);
                 }
             }
@@ -303,7 +389,7 @@ namespace Mutagen
                         float rr = pr.r + e.r;
                         if (Rng.Dist2(pr.x, pr.y, e.x, e.y) < rr * rr)
                         {
-                            e.Hurt(pr.damage, this, pr.vx * 0.012f, pr.vy * 0.012f);
+                            e.Hurt(pr.damage, this, pr.owner, pr.vx * 0.012f, pr.vy * 0.012f);
                             if (pr.poison != 0f) e.ApplyPoison(pr.poison);
                             pr.dead = true;
                             AddParticle(pr.x, pr.y, 0f, 0f, .2f, pr.color, 4f);
@@ -313,10 +399,13 @@ namespace Mutagen
                 }
                 else
                 {
-                    float rr = pr.r + player.r;
-                    if (Rng.Dist2(pr.x, pr.y, player.x, player.y) < rr * rr)
+                    for (int pi = 0; pi < players.Length; pi++)
                     {
-                        player.Hurt(pr.damage, this); pr.dead = true;
+                        var pl = players[pi];
+                        if (pl == null || !pl.alive) continue;
+                        float rr = pr.r + pl.r;
+                        if (Rng.Dist2(pr.x, pr.y, pl.x, pl.y) < rr * rr)
+                        { pl.Hurt(pr.damage, this); pr.dead = true; break; }
                     }
                 }
             }
@@ -324,6 +413,43 @@ namespace Mutagen
         }
 
         public Enemy NearestEnemy(float x, float y, float range) => grid.Nearest(x, y, range);
+
+        // Nearest living hero to a point (low-index tie-break). Null if every hero is down.
+        public Player NearestPlayer(float x, float y)
+        {
+            Player best = null; float bestD = float.MaxValue;
+            for (int i = 0; i < players.Length; i++)
+            {
+                var p = players[i];
+                if (p == null || !p.alive) continue;
+                float d = Rng.Dist2(x, y, p.x, p.y);
+                if (d < bestD) { bestD = d; best = p; }
+            }
+            return best;
+        }
+
+        // The non-local hero (co-op partner), or null in single-player.
+        public Player Partner()
+        {
+            for (int i = 0; i < players.Length; i++)
+                if (i != localIndex && players[i] != null) return players[i];
+            return null;
+        }
+
+        // Throwaway bot AI for the local loopback test: approach the nearest enemy, back off if too
+        // close. Deterministic (no cosmetic RNG) so it never affects the determinism gate.
+        Vector2 BotMove(Player p)
+        {
+            var e = NearestEnemy(p.x, p.y, 99999f);
+            if (e == null) return Vector2.zero;
+            float dx = e.x - p.x, dy = e.y - p.y, d = Mathf.Sqrt(dx * dx + dy * dy);
+            if (d < 1f) return Vector2.zero;
+            float nx = dx / d, ny = dy / d;
+            float ideal = e.r + 34f;                            // sit just outside the enemy, in melee range
+            if (d > ideal + 22f) return new Vector2(nx, ny);    // too far: close in
+            if (d < ideal - 22f) return new Vector2(-nx, -ny);  // too close: ease back
+            return new Vector2(-ny, nx);                        // in the band: orbit rather than jitter toward/away
+        }
 
         public void Explode(float x, float y, float radius, float dmg, Color color)
         {
@@ -337,10 +463,15 @@ namespace Mutagen
             for (int i = 0; i < enemies.Count; i++)
             {
                 var e = enemies[i];
-                if (Rng.Dist2(x, y, e.x, e.y) < (radius + e.r) * (radius + e.r)) e.Hurt(dmg, this);
+                if (Rng.Dist2(x, y, e.x, e.y) < (radius + e.r) * (radius + e.r)) e.Hurt(dmg, this, null);
             }
-            if (Rng.Dist2(x, y, player.x, player.y) < (radius + player.r) * (radius + player.r))
-                player.Hurt(dmg * 0.5f, this);
+            for (int pi = 0; pi < players.Length; pi++)
+            {
+                var pl = players[pi];
+                if (pl == null || !pl.alive) continue;
+                if (Rng.Dist2(x, y, pl.x, pl.y) < (radius + pl.r) * (radius + pl.r))
+                    pl.Hurt(dmg * 0.5f, this);
+            }
         }
 
         // ---------------------------------------------------------------- waves / spawning
@@ -432,7 +563,74 @@ namespace Mutagen
         }
 
         // ---------------------------------------------------------------- level up / draft
-        public void OnLevelUp() { pendingLevels++; if (state == GameState.Playing) OpenDraft(); }
+        public void OnLevelUp(Player p)
+        {
+            if (coop)
+            {
+                if (p.isBot && !Net.CoopNet.Connected) { BotDraft(p); return; } // solo loopback bot auto-picks
+                p.pendingDrafts++;
+                if (p.draftOptions == null) p.draftOptions = mutations.Draft(p, 3); // deterministic on both peers
+                p.invuln = Mathf.Max(p.invuln, 1f);              // grace while picking — set on BOTH peers (it's sim state)
+                if (p.index == localIndex && p.pendingDrafts == 1) ShowLocalCoopDraft(p); // panel is UI-only (local)
+                return;
+            }
+            if (p.isBot) { BotDraft(p); return; }               // bot auto-picks; never blocks on the UI draft
+            pendingLevels++; if (state == GameState.Playing) OpenDraft();
+        }
+
+        void ShowLocalCoopDraft(Player p) =>
+            ui.ShowDraft(p.draftOptions, def => SetLocalDraftPick(p.draftOptions.IndexOf(def)));
+
+        // The local hero clicked a co-op upgrade card; queue the choice into the next input packet so it
+        // applies on the same tick on both peers.
+        public void SetLocalDraftPick(int idx) { if (idx >= 0) _pendingDraftByte = (byte)(idx + 1); }
+
+        // Apply a co-op upgrade pick to hero p — driven by the TickInput.draft byte, so it runs identically
+        // on both peers at the same tick.
+        void ApplyCoopDraft(Player p, byte draft)
+        {
+            if (p.draftOptions == null || p.pendingDrafts <= 0) return;
+            int idx = draft - 1;
+            if (idx < 0 || idx >= p.draftOptions.Count) return;
+            ApplyMutation(p, p.draftOptions[idx]);
+            p.pendingDrafts--;
+            p.draftOptions = p.pendingDrafts > 0 ? mutations.Draft(p, 3) : null;
+            if (p.index == localIndex)
+            {
+                if (p.draftOptions != null) ShowLocalCoopDraft(p); else ui.HideDraft();
+                ui.RenderMuts();
+            }
+        }
+
+        // Grant a drafted mutation to hero p (shared by co-op picks and the loopback bot).
+        void ApplyMutation(Player p, MutationDef def)
+        {
+            if (!string.IsNullOrEmpty(def.move))
+            {
+                if (p.HasMove(def.move))
+                {
+                    int lvl = (p.moveLevel[def.move] += 1);
+                    p.mutations[def.move] = lvl;
+                    MutationEffects.Apply(def.move, p);
+                    if (def.maxStacks != 0 && lvl == def.maxStacks && !p.evolved.Contains(def.move))
+                    { p.evolved.Add(def.move); MutationEffects.Evolve(def.move, p); }
+                }
+                else
+                {
+                    int slot = p.FreeMoveSlot();
+                    if (slot >= 0) { p.moveSlots[slot] = def.move; p.moveLevel[def.move] = 1; p.mutations[def.move] = 1; MutationEffects.Apply(def.move, p); }
+                    // loadout full: pick is skipped (no co-op replace flow yet)
+                }
+            }
+            else mutations.Pick(def, p);
+        }
+
+        // A loopback bot resolves its pick immediately (first drafted option), no UI.
+        void BotDraft(Player p)
+        {
+            var opts = mutations.Draft(p, 3);
+            if (opts.Count > 0) ApplyMutation(p, opts[0]);
+        }
 
         void OpenDraft()
         {
@@ -563,12 +761,89 @@ namespace Mutagen
 
         const float TAU = Mathf.PI * 2f;
 
+        // ---------------------------------------------------------------- determinism harness
+        // FNV-1a hash over the gameplay-critical state (NOT cosmetics). Used to verify the sim is
+        // reproducible from a seed — the load-bearing assumption for lockstep multiplayer + a daily
+        // seed challenge. Also the basis of the runtime desync checksum in the netcode plan.
+        public ulong Checksum()
+        {
+            ulong h = 1469598103934665603UL;
+            void Mix(long v) { h = (h ^ (ulong)v) * 1099511628211UL; }
+            void MixF(float f) { Mix(System.BitConverter.SingleToInt32Bits(f)); }
+            Mix(Rng.State);
+            Mix(wave); MixF(waveTimer);
+            for (int i = 0; i < players.Length; i++)
+            {
+                var p = players[i];
+                if (p != null) { MixF(p.x); MixF(p.y); MixF(p.hp); MixF(p.xp); Mix(p.level); }
+            }
+            Mix(enemies.Count);
+            for (int i = 0; i < enemies.Count; i++) { var e = enemies[i]; MixF(e.x); MixF(e.y); MixF(e.hp); }
+            Mix(projectiles.Count);
+            for (int i = 0; i < projectiles.Count; i++) { var p = projectiles[i]; MixF(p.x); MixF(p.y); }
+            return h;
+        }
+
+        // Run the sim twice from the same seed with identical (idle) input and compare the end-state
+        // hash. God mode keeps the idle player alive (no death/draft side effects), so this isolates
+        // spawn/enemy-AI/projectile/RNG determinism. Destructive: resets any in-progress run.
+        public void RunDeterminismCheck(int ticks = 600)
+        {
+            uint seed = Rng.SeedToInt("determinism-probe");
+            ulong a = SimulateHeadless(seed, ticks);
+            ulong b = SimulateHeadless(seed, ticks);
+            Debug.Log($"[MUTAGEN] Determinism {(a == b ? "PASS ✓" : "FAIL ✗")} after {ticks} ticks — {a:X16} vs {b:X16}");
+            GotoMenu();
+        }
+
+        ulong SimulateHeadless(uint seed, int ticks)
+        {
+            Rng.Set(seed);
+            bool prevGod = god, prevAuto = autocast, prevCoop = coop;
+            coop = false;                 // the gate always tests the shipping single-player sim
+            Reset();
+            god = true; autocast = false; state = GameState.Playing;
+            for (int i = 0; i < ticks; i++)
+            {
+                for (int s = 0; s < 4; s++) _moveQueued[s] = false;
+                _dashQueued = false;
+                Step(FIXED);
+            }
+            ulong h = Checksum();
+            god = prevGod; autocast = prevAuto; coop = prevCoop;
+            return h;
+        }
+
         // ---------------------------------------------------------------- run lifecycle
+        // A hero hit 0 HP. Play their death burst; the run only ends once every hero is down.
+        public void OnPlayerDowned(Player p)
+        {
+            if (state == GameState.Dead || state == GameState.Won) return; // run already ended
+            Explode(p.x, p.y, 40f, 0f, Palette.Ink);
+            if (coop) { CoopEnd(); return; }  // competitive co-op: the first fall ends the run
+            GameOver();                        // solo: one hero, so this ends it
+        }
+
+        // Co-op is competitive: the first hero to fall loses, the survivor wins. Runs deterministically on
+        // both peers at the same tick; each device then shows its own result + updates its win/loss tally.
+        void CoopEnd()
+        {
+            state = GameState.Dead; Sfx.Over();
+            Player winner = null;
+            for (int i = 0; i < players.Length; i++)
+                if (players[i] != null && players[i].alive) { winner = players[i]; break; }
+            bool draw = winner == null;                     // both fell on the same tick
+            bool localWon = !draw && winner.index == localIndex;
+            CaptureMonster(localWon);
+            if (!draw) SaveSystem.AddCoopResult(localWon);
+            ui.HideDraft();
+            ui.ShowCoopEnd(localWon, draw);
+        }
+
         public void GameOver()
         {
             if (state == GameState.Dead || state == GameState.Won) return;
             state = GameState.Dead; Sfx.Over();
-            Explode(player.x, player.y, 40f, 0f, Palette.Ink);
             CaptureMonster(false);
             ui.ShowEnd(false);
         }
@@ -654,11 +929,66 @@ namespace Mutagen
         }
 
         public void ReplaySeed() => StartRun(seedText);
+
+        // Both networked peers call this once connected: same seed → identical run. localIndex is
+        // already set (host 0 / client 1); the non-local hero is driven by remote input in Step().
+        public void StartCoopRun()
+        {
+            coop = true;
+            Rng.Set(Rng.SeedToInt(seedText));
+            Reset();
+            // Prime the input pipeline: the first InputDelay ticks run neutral input on both sides, so
+            // real input flows with a fixed delay and both sims stay tick-for-tick identical.
+            _execTick = 0; _stallFrames = 0; _pendingDraftByte = 0; _nextCompareTick = 0; _desynced = false;
+            _localBuf.Clear(); _localChecksums.Clear(); Net.CoopSync.ResetBuffer();
+            for (int t = 0; t < InputDelay; t++) SampleAndSend(t, Vector2.zero, false, false, false, false, false);
+            ui.HideStart(); ui.HideEnd(); ui.HidePause();
+            SetBanner("CO-OP · WAVE 1", null, Palette.Dna, 1.8f);
+            state = GameState.Playing;
+        }
+
+        // Buffer a local input for a tick and broadcast a redundant window of recent inputs.
+        void SampleAndSend(int tick, Vector2 move, bool m1, bool m2, bool m3, bool m4, bool dash, byte draft = 0)
+        {
+            _localBuf[tick] = Net.TickInput.Local(tick, move, m1, m2, m3, m4, dash, draft);
+            _sendBatch.Clear();
+            for (int t = Mathf.Max(0, tick - Redundancy + 1); t <= tick; t++)
+                if (_localBuf.TryGetValue(t, out var b)) _sendBatch.Add(b);
+            Net.CoopSync.SendBatch(_sendBatch);
+        }
+
+        // While stalled (waiting on the partner), re-broadcast our newest inputs in case they were dropped.
+        void ResendRecent()
+        {
+            int newest = _execTick + InputDelay - 1;
+            _sendBatch.Clear();
+            for (int t = Mathf.Max(0, newest - Redundancy + 1); t <= newest; t++)
+                if (_localBuf.TryGetValue(t, out var b)) _sendBatch.Add(b);
+            if (_sendBatch.Count > 0) Net.CoopSync.SendBatch(_sendBatch);
+        }
+
+        // Compare our state hash against the partner's at each checksum tick; flag the first divergence.
+        void CompareChecksums()
+        {
+            while (_localChecksums.TryGetValue(_nextCompareTick, out var local) &&
+                   Net.CoopSync.TryGetRemoteChecksum(_nextCompareTick, out var remote))
+            {
+                if (local != remote && !_desynced)
+                {
+                    _desynced = true;
+                    Debug.LogError($"[MUTAGEN][net] DESYNC at tick {_nextCompareTick}: local {local:X16} vs peer {remote:X16}");
+                    SetBanner("DESYNC", "games drifted out of sync", Palette.HurtRed, 6f);
+                }
+                _localChecksums.Remove(_nextCompareTick);
+                Net.CoopSync.RemoveRemoteChecksum(_nextCompareTick);
+                _nextCompareTick += ChecksumInterval;
+            }
+        }
         public void GotoMenu() { ReleaseAll(); state = GameState.Menu; _paused = false; ui.HideEnd(); ui.HideDraft(); ui.HideReplace(); ui.HidePause(); ui.ShowStart(); }
 
         public void TogglePause()
         {
-            if (state != GameState.Playing) return;
+            if (state != GameState.Playing || coop) return; // no pausing in co-op — it would freeze/desync the shared sim
             _paused = !_paused;
             if (_paused) ui.ShowPause(); else ui.HidePause();
         }
@@ -666,7 +996,14 @@ namespace Mutagen
         void Reset()
         {
             ReleaseAll();
-            player = new Player(this);
+            int heroCount = coop ? 2 : 1;
+            for (int i = 0; i < players.Length; i++)
+            {
+                if (i >= heroCount) { players[i] = null; continue; }       // solo: only hero 0 exists
+                var p = new Player(this) { index = i, isBot = coop && i != localIndex };
+                if (coop) p.x = w / 2f + (i == 0 ? -46f : 46f);            // co-op: nudge apart so they don't overlap
+                players[i] = p;
+            }
             wave = 1; waveTimer = 22f; spawnCd = 0f; intermission = 0f;
             pendingBoss = false; finalBossPending = false;
             bossAlive = false; bossesSpawned.Clear();
@@ -693,10 +1030,10 @@ namespace Mutagen
             floaters.Add(f.Set(x, y, text, color, size));
         }
 
-        public void AddProjectile(float x, float y, float vx, float vy, bool playerOwned, float damage, Color color, float r = 5f, float life = 3f, float poison = 0f)
+        public void AddProjectile(float x, float y, float vx, float vy, bool playerOwned, float damage, Color color, float r = 5f, float life = 3f, float poison = 0f, Player owner = null)
         {
             var pr = _freeProjectiles.Count > 0 ? _freeProjectiles.Pop() : new Projectile();
-            projectiles.Add(pr.Set(x, y, vx, vy, playerOwned, damage, color, r, life, poison));
+            projectiles.Add(pr.Set(x, y, vx, vy, playerOwned, damage, color, r, life, poison, owner));
         }
 
         public void AddOrb(float x, float y, float value)
@@ -711,10 +1048,10 @@ namespace Mutagen
             beams.Add(b.Set(x1, y1, x2, y2, color));
         }
 
-        public void AddHazard(float x, float y, float r, float dps, float life, float pull, float slowMul, bool poison, Color color)
+        public void AddHazard(float x, float y, float r, float dps, float life, float pull, float slowMul, bool poison, Color color, Player owner = null)
         {
             var h = _freeHazards.Count > 0 ? _freeHazards.Pop() : new Hazard();
-            hazards.Add(h.Set(x, y, r, dps, life, pull, slowMul, poison, color));
+            hazards.Add(h.Set(x, y, r, dps, life, pull, slowMul, poison, color, owner));
         }
 
         // ---------------------------------------------------------------- culling (release sim object + view)
@@ -781,14 +1118,15 @@ namespace Mutagen
             beams.Clear();
             foreach (var h in hazards) { ReleaseView(ref h.view); _freeHazards.Push(h); }
             hazards.Clear();
-            if (player != null) ReleaseView(ref player.view);
+            for (int i = 0; i < players.Length; i++)
+                if (players[i] != null) ReleaseView(ref players[i].view);
         }
 
         // ---------------------------------------------------------------- render (sync views)
         void Render()
         {
             // Camera is static (set in SetupCamera); Feel's MMCameraShaker owns all camera shake.
-            if (state == GameState.Menu) { _playerVisual.Sync(null, false); return; }
+            if (state == GameState.Menu) { for (int i = 0; i < 2; i++) _playerVisuals[i].Sync(null, false); return; }
 
             // hazard zones (soft translucent pools, drawn under everything else)
             for (int i = 0; i < hazards.Count; i++)
@@ -828,11 +1166,15 @@ namespace Mutagen
                 Color c = pt.color; c.a = a;
                 pt.view.Set(pt.x, pt.y, Mathf.Max(0.01f, pt.size * a), c);
             }
-            // player (procedural creature)
-            _playerVisual.Sync(player, player != null);
-            // clones
-            if (player != null)
-                foreach (var c in player.clones) { EnsureView(ref c.view); c.view.HideBar(); c.view.Set(c.x, c.y, c.r, Palette.CloneBody, 0.4f); }
+            // heroes (procedural creatures) + their clones. The partner hero is tinted blue so you can tell them apart.
+            for (int i = 0; i < players.Length; i++)
+            {
+                var p = players[i];
+                Color? tint = (p != null && p.index != localIndex) ? (Color?)new Color(0.45f, 0.7f, 1f) : null;
+                _playerVisuals[i].Sync(p, p != null && p.alive, tint);
+                if (p == null) continue;
+                foreach (var c in p.clones) { EnsureView(ref c.view); c.view.HideBar(); c.view.Set(c.x, c.y, c.r, Palette.CloneBody, 0.4f); }
+            }
             // floaters
             for (int i = 0; i < floaters.Count; i++)
             {
@@ -846,13 +1188,15 @@ namespace Mutagen
         void EnsureBeam(Beam b) { if (b.view == null) b.view = _beamPool.Get(); }
 
         // ---------------------------------------------------------------- misc / debug
-        public void Shake(float a) { if (_juice != null) _juice.Shake(a); }
+        public void Shake(float a) { if (GameSettings.ScreenShake && _juice != null) _juice.Shake(a); }
         public void ToggleDebug() { debug = !debug; ui.SetDebugVisible(debug); }
 
         public void DebugGod() { god = !god; ui.RefreshGodBtn(); }
         public void DebugLevel() { if (player != null) player.AddXp(player.xpNext - player.xp + 1f, this); }
         public void DebugDna() { if (player != null) player.AddXp(200f, this); }
         public void DebugSlow() { slowmo = !slowmo; }
+        // Toggle co-op mode from the debug panel. Takes effect on the NEXT run (Reset spawns hero 2).
+        public void DebugCoop() { coop = !coop; ui.RefreshCoopBtn(); }
         public void DebugTouch() { TouchInput.ForceTouch = !TouchInput.ForceTouch; }
         public void DebugKillAll() { foreach (var e in new List<Enemy>(enemies)) if (!e.dead) e.Die(this); }
         public void DebugSpawnBoss() { if (state == GameState.Playing) SpawnBoss(); }

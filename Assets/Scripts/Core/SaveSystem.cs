@@ -44,5 +44,19 @@ namespace Mutagen
             c.monsters.Insert(0, rec);
             SaveMonsters(c);
         }
+
+        /// <summary>Wipe the whole monster archive.</summary>
+        public static void ClearMonsters() => SaveMonsters(new MonsterCollection());
+
+        // ---- co-op record (per device) ----
+        public static int CoopWins => PlayerPrefs.GetInt("coop_wins", 0);
+        public static int CoopLosses => PlayerPrefs.GetInt("coop_losses", 0);
+
+        public static void AddCoopResult(bool won)
+        {
+            string k = won ? "coop_wins" : "coop_losses";
+            PlayerPrefs.SetInt(k, PlayerPrefs.GetInt(k, 0) + 1);
+            PlayerPrefs.Save();
+        }
     }
 }

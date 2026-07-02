@@ -1,13 +1,38 @@
 # Morphage — Multiplayer Readiness & Plan
 
-> Status: **co-op deferred, foundation kept ready.** This is the durable reference to
-> point back to when we're ready to build online 2-player co-op. It captures the
-> chosen approach, the exact refactor checklist, and the one discipline to honor in
-> the meantime so we don't accumulate sync-debt.
+> Status: **online co-op IN PROGRESS — basic play working over the internet.** Two players
+> connect by share code, each drives their own hero (move + attack), enemies/waves shared.
 >
 > Target design: **online co-op, 2 players, independent builds** (each player has
-> their own HP, XP, level, move loadout, and mutation draft; enemies and waves are
-> shared).
+> their own HP, XP, level, move loadout, and mutation draft; enemies and waves are shared).
+
+## Built so far (this session)
+- **A2/A3 done:** owner attribution + the 2-hero sim (`Game.players[2]` + `localIndex`, `player` alias),
+  gated behind a `Game.coop` mode. Determinism check stays green (single-player byte-identical).
+- **Transport decision REVISED from §3 below:** using the modern **`com.unity.services.multiplayer`
+  Sessions API** (create/join by code, seed carried as a session property) on top of **NGO
+  (`com.unity.netcode.gameobjects`)** as the connection layer — NGO purely for the pipe + custom
+  messaging, **no NetworkObjects** (so the lockstep design is intact). Not the raw-UTP+Relay+Lobby of §3.
+- **Files:** `Net/CoopNet.cs` (sign-in, host/join, seed, NetworkManager bootstrap), `Net/CoopSync.cs`
+  (per-tick input packets over `CustomMessagingManager`, auto-start), `Net/TickInput.cs` (input packet).
+- **Working:** Stage 1 (connect + seed) ✅. Stage 2 **strict lockstep** ✅ — tick-indexed input buffers,
+  `InputDelay=4`, redundant unreliable packets + resend-on-stall (no deadlock), both sims step identically
+  (`_stepInput[2]` set in `Game.Tick`). Verified: two MPPM screens stay in sync through combat, no hang.
+  Fixed one cosmetic-RNG-in-gameplay leak (Mitosis clone angle → seeded `Rng`).
+- **Co-op draft (Option B) ✅** — non-blocking: level-up never pauses; the leveller gets a card panel + full
+  invuln while choosing (both peers set the shield — it's sim state); the pick rides the `TickInput.draft`
+  byte and both peers apply the identical option at the same tick. Single-player keeps its pause-to-pick.
+  `mutations.Draft` is seeded, so both peers compute identical cards. (No reroll / loadout-full replace yet.)
+- **Competitive finish ✅** — co-op is last-one-standing: first fall ends the run (`CoopEnd`), survivor = WINNER,
+  fallen = DEFEATED (DRAW if same tick). Per-device W/L record in PlayerPrefs (`SaveSystem.CoopWins/Losses`).
+  Menu cleaned up: real **Co-op** overlay (Host/Join by code); pause disabled in co-op.
+- **Still TODO (priority order):**
+  1. **Desync checksum + resync fallback** — periodic state hash compare; needed for real devices where IL2CPP
+     float math may differ across chips (MPPM shares one binary, so it can't surface cross-device drift).
+  2. **Disconnect / rematch handling** — tear down + cleanly re-host a session (a 2nd co-op game currently needs
+     an editor restart); handle a peer dropping mid-run.
+  3. **Test on two real phones** (only MPPM-tested so far). 4. Polish: compact non-blocking card panel, reroll,
+     loadout-full replace, surface the W/L record on the menu.
 
 ---
 
@@ -126,12 +151,15 @@ Build as a **local loopback first** (both players driven locally, no networking)
   `HandleProjectiles` (enemy branch) and `Explode`.
 - **DNA orb attribution** — `DNAOrb.Update` returns the collecting player index (pull toward
   nearest living player); award XP to that player only.
-- **Per-player draft, shared pause** — keep the single `GameState` machine and the
-  "sim halts when state != Playing" rule. Move `pendingLevels` and `rerolls` onto `Player`.
-  Add `_draftingIndex` + a `Queue<int> _draftQueue`. `OnLevelUp(Player p)` enqueues that
-  player's index; `OpenNextDraft()` pops one and drafts for that player. If both level the same
-  tick, drafts resolve sequentially (0 then 1) — deterministic because `MutationManager.Draft`
-  draws from the shared seeded `Rng` in fixed order. `OnBossKilled` grants a reroll to both.
+- **Per-player draft — LIVE picking, no world pause (DECISION: Option B).** The sim must NOT halt for a
+  level-up. When a player levels, show *them* a non-blocking card panel while combat keeps running for
+  both; the levelling player keeps control (grant brief i-frames while the panel is open so they aren't
+  punished for reading), and the other player is never interrupted. Implies: move `pendingLevels` and
+  `rerolls` onto `Player`; replace the global `state == LevelUp` halt with a per-player `_drafting` flag;
+  cards are tap/click-to-pick (keep 1–4 as ability keys during live play). Only the **choice** (option
+  index / reroll / replace-slot) travels over the wire; both sims replay it in fixed player order so
+  `MutationManager.Draft`'s seeded draws stay deterministic. `OnBossKilled` grants a reroll to both.
+  NOTE: single-player keeps its existing full pause-to-pick — the live panel is a co-op-only behaviour.
 - **Dual rendering** — `PlayerVisual[2]`; loop both in `Render()` and iterate both players'
   clones (Clone already stores its owner). Tint local vs. remote.
 - **Game over** — run ends only when **both** players are dead (`Player.Hurt` death path →
@@ -165,8 +193,10 @@ Build as a **local loopback first** (both players driven locally, no networking)
 
 - Two HP/XP/move panels: local player gets the full interactive move bar; remote player a
   compact read-only HP/XP/level strip. Parameterize `SyncHud`/`RenderMuts` by player index.
-- Non-drafting client shows a blocking "Player 2 is choosing…" overlay while
-  `_draftingIndex != localIndex`; only the drafting device's input is accepted.
+- No "waiting for partner" overlay — with live picking (Option B) neither player is ever blocked by the
+  other's level-up. Each player's card panel is local and non-blocking, overlaid on the still-running game
+  (smaller than the single-player full-screen draft so the fight stays visible); the levelling hero gets
+  brief i-frames while it's open.
 - Lobby/join-code screen: extend `startOverlay` with Host/Join, host code display, client code
   field, "waiting for player…".
 - Disconnect (v1 scope): UTP disconnect event → "Opponent left" → continue-solo (freeze the
@@ -176,9 +206,11 @@ Build as a **local loopback first** (both players driven locally, no networking)
 
 ## 7. Staged sequence
 
-- **Stage 0 — determinism (done) + 2-players-on-one-device loopback.** Prove the game plays
-  identically every time: run the **same seed twice** and assert identical end-state
-  checksums. This gate is the biggest de-risk — get it green before any networking.
+- **Stage 0 — determinism (✅ VERIFIED) + 2-players-on-one-device loopback.** The same-seed-twice
+  checksum harness is built (`Game.Checksum` / `Game.RunDeterminismCheck`, debug-panel "Determinism"
+  button) and **passes** — identical end-state hash across two 600-tick runs. Re-run it as a
+  regression gate after each sim refactor (owner attribution, player array). Still to do here:
+  the local 2-player loopback (`Game.player` → `Player[2]`), no networking yet.
 - **Stage 1 — transport / lobby / relay.** Two virtual players connect by join code, log the
   same seed + distinct `localIndex`.
 - **Stage 2 — lockstep + checksum.** Feed remote input into the second player; add periodic

@@ -8,15 +8,16 @@ namespace Mutagen
         public float x, y, vx, vy, r, damage, life, poison;
         public Color color;
         public bool playerOwned;
+        public Player owner; // shooter — for damage attribution (crit/synergy/lifesteal). null for enemy shots.
         public bool dead;
         public SpriteView view;
 
         public Projectile Set(float x, float y, float vx, float vy,
-            bool playerOwned, float damage, Color color, float r = 5f, float life = 3f, float poison = 0f)
+            bool playerOwned, float damage, Color color, float r = 5f, float life = 3f, float poison = 0f, Player owner = null)
         {
             this.x = x; this.y = y; this.vx = vx; this.vy = vy;
             this.playerOwned = playerOwned; this.damage = damage; this.color = color;
-            this.r = r; this.life = life; this.poison = poison; dead = false;
+            this.r = r; this.life = life; this.poison = poison; this.owner = owner; dead = false;
             return this;
         }
 

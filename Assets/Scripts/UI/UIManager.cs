@@ -17,11 +17,15 @@ namespace Mutagen
 
         VisualElement _hud, _debug, _startOverlay, _levelOverlay, _deathOverlay;
         VisualElement _codexOverlay, _codexList;
-        VisualElement _galleryOverlay, _galleryList;
+        VisualElement _galleryOverlay, _galleryList, _gameModeOverlay, _coopOverlay;
         Label _galleryEmpty;
         readonly System.Collections.Generic.List<RenderTexture> _portraits = new();
+        Button _hapticsToggle, _shakeToggle, _clearDataBtn, _perfToggle, _handToggle;
+        int _titleTaps;
         VisualElement _hpFill, _xpFill, _muts, _cards;
-        Label _hpTxt, _xpTxt, _lvlVal, _waveVal, _dnaVal;
+        Label _hpTxt, _xpTxt, _lvlVal, _waveVal, _dnaVal, _partnerHp;
+        // Co-op menu controls (bound from the coop overlay in UXML)
+        Button _hostBtn, _joinBtn; TextField _codeField; Label _netStatus;
         Label _dWave, _dLvl, _dKills, _dTime, _dDps, _dTaken, _dMuts, _dSeed, _dbgInfo, _dbgTitle;
         Label _banner, _endEyebrow, _endBig, _replaceTitle, _replaceSub;
         VisualElement _movebar, _replaceOverlay, _replaceSlots, _settingsOverlay, _bindList, _pauseOverlay;
@@ -105,7 +109,7 @@ namespace Mutagen
             // Force a large, orientation-independent UI scale at runtime (no asset regen needed).
             // match=0.5 => scale tracks screen AREA, so portrait and landscape read the same size.
             panel.scaleMode = PanelScaleMode.ScaleWithScreenSize;
-            panel.referenceResolution = new Vector2Int(1024, 576);
+            panel.referenceResolution = new Vector2Int(800, 450); // smaller ref = larger on-screen UI (~1.28× bigger)
             panel.screenMatchMode = PanelScreenMatchMode.MatchWidthOrHeight;
             panel.match = 0.5f;
 
@@ -131,6 +135,11 @@ namespace Mutagen
             _root = doc.rootVisualElement;
             if (uss != null && !_root.styleSheets.Contains(uss)) _root.styleSheets.Add(uss);
 
+            // Apply the Oxanium font in code (runtime-loaded USS can't reliably carry a url() font ref).
+            // Null-guarded so text falls back to the default rather than vanishing if the font is missing.
+            var uiFont = Resources.Load<Font>("Fonts/Oxanium");
+            if (uiFont != null) _root.style.unityFontDefinition = new StyleFontDefinition(FontDefinition.FromFont(uiFont));
+
             // Inset the whole UI inside the device safe area (notch, home indicator, rounded corners).
             // Recompute on every layout change (rotation / device-simulator swap re-fires this).
             _root.RegisterCallback<GeometryChangedEvent>(_ => ApplySafeArea());
@@ -151,6 +160,8 @@ namespace Mutagen
             _settingsOverlay = Q("settingsOverlay"); _bindList = Q("bindList");
             _codexOverlay = Q("codexOverlay"); _codexList = Q("codexList");
             _galleryOverlay = Q("galleryOverlay"); _galleryList = Q("galleryList"); _galleryEmpty = L("galleryEmpty");
+            _gameModeOverlay = Q("gameModeOverlay");
+            _coopOverlay = Q("coopOverlay");
             _volMaster = _root.Q<Slider>("volMaster"); _volMusic = _root.Q<Slider>("volMusic"); _volSfx = _root.Q<Slider>("volSfx");
             _seedField = _root.Q<TextField>("seedField");
             _soundToggle = _root.Q<Button>("soundToggle");
@@ -166,7 +177,7 @@ namespace Mutagen
             _root.Q<Button>("replayBtn").clicked += () => _game.ReplaySeed();
             _root.Q<Button>("menuBtn").clicked += () => _game.GotoMenu();
             _rerollBtn.clicked += () => _game.Reroll();
-            _soundToggle.clicked += () => { Sfx.Enabled = !Sfx.Enabled; SyncSound(); };
+            _soundToggle.clicked += () => { GameSettings.SetSound(!Sfx.Enabled); SyncSound(); };
             _modeToggle.clicked += () =>
             {
                 _endless = !_endless;
@@ -178,11 +189,22 @@ namespace Mutagen
                 _autocast = !_autocast;
                 _autoToggle.text = "Auto-cast: " + (_autocast ? "On" : "Off");
                 if (_autocast) _autoToggle.AddToClassList("on"); else _autoToggle.RemoveFromClassList("on");
+                PlayerPrefs.SetInt("opt_autocast", _autocast ? 1 : 0); PlayerPrefs.Save();
             };
             var settingsBtn = _root.Q<Button>("settingsBtn");
             if (settingsBtn != null) settingsBtn.clicked += ShowSettings;
             var settingsDone = _root.Q<Button>("settingsDone");
             if (settingsDone != null) settingsDone.clicked += HideSettings;
+            _hapticsToggle = _root.Q<Button>("hapticsToggle");
+            if (_hapticsToggle != null) _hapticsToggle.clicked += () => { GameSettings.SetHaptics(!Haptics.Enabled); SyncToggle(_hapticsToggle, Haptics.Enabled, "Vibration"); };
+            _shakeToggle = _root.Q<Button>("shakeToggle");
+            if (_shakeToggle != null) _shakeToggle.clicked += () => { GameSettings.SetShake(!GameSettings.ScreenShake); SyncToggle(_shakeToggle, GameSettings.ScreenShake, "Screen Shake"); };
+            _clearDataBtn = _root.Q<Button>("clearDataBtn");
+            if (_clearDataBtn != null) _clearDataBtn.clicked += () => { SaveSystem.ClearMonsters(); _clearDataBtn.text = "Archive Cleared"; };
+            _perfToggle = _root.Q<Button>("perfToggle");
+            if (_perfToggle != null) _perfToggle.clicked += () => { GameSettings.SetReducedEffects(!GameSettings.ReducedEffects); SyncToggle(_perfToggle, GameSettings.ReducedEffects, "Reduced FX"); };
+            _handToggle = _root.Q<Button>("handToggle");
+            if (_handToggle != null) _handToggle.clicked += () => { GameSettings.SetLeftHanded(!GameSettings.LeftHanded); ApplyLeftHanded(); SyncToggle(_handToggle, GameSettings.LeftHanded, "Left-Handed"); };
             var codexBtn = _root.Q<Button>("codexBtn");
             if (codexBtn != null) codexBtn.clicked += ShowCodex;
             var pauseCodexBtn = _root.Q<Button>("pauseCodexBtn");
@@ -191,8 +213,31 @@ namespace Mutagen
             if (codexDone != null) codexDone.clicked += HideCodex;
             var galleryBtn = _root.Q<Button>("galleryBtn");
             if (galleryBtn != null) galleryBtn.clicked += ShowGallery;
+            // Touch-friendly way into the debug panel (phones have no Tab key): triple-tap the title.
+            var menuTitle = _root.Q<Label>("menuTitle");
+            if (menuTitle != null)
+                menuTitle.RegisterCallback<ClickEvent>(_ =>
+                {
+                    _titleTaps++;
+                    if (_titleTaps >= 3) { _titleTaps = 0; _game.ToggleDebug(); }
+                    else menuTitle.schedule.Execute(() => _titleTaps = 0).StartingIn(800);
+                });
             var galleryDone = _root.Q<Button>("galleryDone");
             if (galleryDone != null) galleryDone.clicked += HideGallery;
+            var gameModeBtn = _root.Q<Button>("gameModeBtn");
+            if (gameModeBtn != null) gameModeBtn.clicked += ShowGameMode;
+            var gameModeDone = _root.Q<Button>("gameModeDone");
+            if (gameModeDone != null) gameModeDone.clicked += HideGameMode;
+            var coopMenuBtn = _root.Q<Button>("coopMenuBtn");
+            if (coopMenuBtn != null) coopMenuBtn.clicked += ShowCoop;
+            var coopDone = _root.Q<Button>("coopDone");
+            if (coopDone != null) coopDone.clicked += HideCoop;
+            _hostBtn = _root.Q<Button>("hostBtn");
+            if (_hostBtn != null) _hostBtn.clicked += OnHostClicked;
+            _joinBtn = _root.Q<Button>("joinBtn");
+            if (_joinBtn != null) _joinBtn.clicked += OnJoinClicked;
+            _codeField = _root.Q<TextField>("coopCodeField");
+            _netStatus = _root.Q<Label>("netStatus");
             var bindReset = _root.Q<Button>("bindReset");
             if (bindReset != null) bindReset.clicked += () => { Binds.Reset(); RenderBinds(); };
             _pauseOverlay = Q("pauseOverlay"); _pauseBtn = _root.Q<Button>("pauseBtn");
@@ -201,14 +246,16 @@ namespace Mutagen
             if (resumeBtn != null) resumeBtn.clicked += _game.TogglePause;
             var pauseMenuBtn = _root.Q<Button>("pauseMenuBtn");
             if (pauseMenuBtn != null) pauseMenuBtn.clicked += _game.GotoMenu;
-            if (_volMaster != null) _volMaster.RegisterValueChangedCallback(e => Sfx.SetMaster(e.newValue / 100f));
-            if (_volMusic != null) _volMusic.RegisterValueChangedCallback(e => Sfx.SetMusic(e.newValue / 100f));
-            if (_volSfx != null) _volSfx.RegisterValueChangedCallback(e => Sfx.SetSfx(e.newValue / 100f));
+            if (_volMaster != null) _volMaster.RegisterValueChangedCallback(e => GameSettings.SetMaster(e.newValue / 100f));
+            if (_volMusic != null) _volMusic.RegisterValueChangedCallback(e => GameSettings.SetMusic(e.newValue / 100f));
+            if (_volSfx != null) _volSfx.RegisterValueChangedCallback(e => GameSettings.SetSfx(e.newValue / 100f));
 
             Hide(_replaceOverlay);
             Hide(_settingsOverlay);
             Hide(_codexOverlay);
             Hide(_galleryOverlay);
+            Hide(_gameModeOverlay);
+            Hide(_coopOverlay);
             Hide(_pauseOverlay);
             if (_pauseBtn != null) _pauseBtn.style.display = DisplayStyle.None;
             if (_banner != null) _banner.style.display = DisplayStyle.None;
@@ -226,14 +273,68 @@ namespace Mutagen
             _root.Q<Button>("dbgTank").clicked += () => _game.DebugSpawn("tank");
             _root.Q<Button>("dbgSpitter").clicked += () => _game.DebugSpawn("spitter");
             _root.Q<Button>("dbgExploder").clicked += () => _game.DebugSpawn("exploder");
+            var dbgDeterm = _root.Q<Button>("dbgDeterm");
+            if (dbgDeterm != null) dbgDeterm.clicked += () => _game.RunDeterminismCheck(600);
+            var dbgCoop = _root.Q<Button>("dbgCoop");
+            if (dbgCoop != null) dbgCoop.clicked += _game.DebugCoop;
 
             // Make every full-screen panel scroll when its content is taller than the safe area.
-            foreach (var ov in new[] { _startOverlay, _settingsOverlay, _codexOverlay, _galleryOverlay, _levelOverlay, _deathOverlay, _replaceOverlay, _pauseOverlay })
+            foreach (var ov in new[] { _startOverlay, _settingsOverlay, _codexOverlay, _galleryOverlay, _gameModeOverlay, _coopOverlay, _levelOverlay, _deathOverlay, _replaceOverlay, _pauseOverlay })
                 WrapInScroll(ov);
 
             Hide(_levelOverlay); Hide(_deathOverlay); Hide(_debug);
             Show(_startOverlay);
-            SyncSound();
+            _autocast = PlayerPrefs.GetInt("opt_autocast", 0) == 1;
+            SyncSettingsUI();
+
+            RefreshCoopBtn();
+
+            // Partner health readout for co-op (top-right corner of the HUD). Hidden in single-player.
+            _partnerHp = new Label();
+            _partnerHp.style.position = Position.Absolute;
+            _partnerHp.style.top = 12f;
+            _partnerHp.style.right = 12f;
+            _partnerHp.style.color = new Color(0.45f, 0.7f, 1f);
+            _partnerHp.style.display = DisplayStyle.None;
+            _root.Add(_partnerHp);
+        }
+
+        async void OnHostClicked()
+        {
+            try
+            {
+                _hostBtn?.SetEnabled(false); _joinBtn?.SetEnabled(false);
+                if (_netStatus != null) _netStatus.text = "Hosting…";
+                string seed = UnityEngine.Random.Range(1, int.MaxValue).ToString();
+                string code = await Net.CoopNet.HostAsync(_game, seed);
+                if (_codeField != null) _codeField.value = code;
+                if (_netStatus != null) _netStatus.text = "Share this code ↑";
+            }
+            catch (System.Exception e)
+            {
+                if (_netStatus != null) _netStatus.text = "Host failed: " + e.Message;
+                Debug.LogError("[MUTAGEN][net] Host failed: " + e);
+            }
+            finally { _hostBtn?.SetEnabled(true); _joinBtn?.SetEnabled(true); }
+        }
+
+        async void OnJoinClicked()
+        {
+            try
+            {
+                string code = (_codeField?.value ?? "").Trim();
+                if (string.IsNullOrEmpty(code)) { if (_netStatus != null) _netStatus.text = "Type the host's code first"; return; }
+                _hostBtn?.SetEnabled(false); _joinBtn?.SetEnabled(false);
+                if (_netStatus != null) _netStatus.text = "Joining…";
+                await Net.CoopNet.JoinAsync(_game, code);
+                if (_netStatus != null) _netStatus.text = "Joined! seed " + _game.seedText;
+            }
+            catch (System.Exception e)
+            {
+                if (_netStatus != null) _netStatus.text = "Join failed: " + e.Message;
+                Debug.LogError("[MUTAGEN][net] Join failed: " + e);
+            }
+            finally { _hostBtn?.SetEnabled(true); _joinBtn?.SetEnabled(true); }
         }
 
         // Reparent an overlay's children into a vertical ScrollView so tall content (e.g. the
@@ -246,6 +347,7 @@ namespace Mutagen
             sv.AddToClassList("oscroll");
             sv.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
             sv.verticalScrollerVisibility = ScrollerVisibility.Hidden; // drag/swipe to scroll, no visible bar
+            sv.contentContainer.style.alignItems = Align.Center;        // keep panels centered, not left-aligned
             var kids = new System.Collections.Generic.List<VisualElement>(overlay.Children());
             foreach (var c in kids) sv.Add(c); // Add() reparents into the scroll view's content
             overlay.Add(sv);
@@ -280,7 +382,7 @@ namespace Mutagen
         // ---------------------------------------------------------------- HUD
         public void SyncHud()
         {
-            var p = _game.player; if (p == null) return;
+            var p = _game.player; if (p == null || _hpFill == null) return;
             _hpFill.style.width = Length.Percent(Rng.Clamp(p.hp / p.maxHp, 0f, 1f) * 100f);
             _hpTxt.text = $"{Mathf.Ceil(p.hp)} / {p.maxHp}";
             _xpFill.style.width = Length.Percent(Rng.Clamp(p.xp / p.xpNext, 0f, 1f) * 100f);
@@ -288,6 +390,20 @@ namespace Mutagen
             _lvlVal.text = p.level.ToString();
             _waveVal.text = _game.wave.ToString();
             _dnaVal.text = Mathf.Round(p.dna).ToString();
+
+            // co-op: partner health readout (hidden in single-player)
+            var partner = _game.Partner();
+            if (_partnerHp != null)
+            {
+                if (partner != null && _game.state == GameState.Playing)
+                {
+                    _partnerHp.style.display = DisplayStyle.Flex;
+                    _partnerHp.text = partner.alive
+                        ? $"Partner  {Mathf.Ceil(partner.hp)} / {partner.maxHp}  ·  Lv {partner.level}"
+                        : "Partner  DOWN";
+                }
+                else _partnerHp.style.display = DisplayStyle.None;
+            }
         }
 
         // One owned-mutation chip from the UXML template, or built in code if it's missing.
@@ -326,7 +442,7 @@ namespace Mutagen
             if (syn.Count > 0)
             {
                 var wrap = new VisualElement(); wrap.AddToClassList("synwrap");
-                foreach (var s in syn) { var chip = new Label("⚡ " + s); chip.AddToClassList("syn"); wrap.Add(chip); }
+                foreach (var s in syn) { var chip = new Label(s); chip.AddToClassList("syn"); wrap.Add(chip); }
                 _muts.Add(wrap);
             }
         }
@@ -416,6 +532,7 @@ namespace Mutagen
                 _cards.Add(card);
             }
             UpdateReroll();
+            if (_rerollBtn != null) _rerollBtn.style.display = _game.coop ? DisplayStyle.None : DisplayStyle.Flex; // no reroll in co-op yet
             Show(_levelOverlay);
         }
 
@@ -452,6 +569,29 @@ namespace Mutagen
                 names += d.displayName + (kv.Value > 1 ? $" ×{kv.Value}" : "") + (p.evolved.Contains(kv.Key) ? "★" : "");
             }
             _dMuts.text = names.Length > 0 ? "Final form: " + names : "A sad, unmutated blob.";
+            var replaySolo = _root.Q<Button>("replayBtn"); if (replaySolo != null) replaySolo.style.display = DisplayStyle.Flex;
+            Show(_deathOverlay);
+        }
+
+        // Competitive co-op result: Winner / Defeated / Draw, with the local hero's stats, the partner's
+        // outcome, and this device's running record.
+        public void ShowCoopEnd(bool won, bool draw)
+        {
+            var g = _game; var p = g.player; var s = g.stats;
+            _dWave.text = g.wave.ToString();
+            _dLvl.text = p.level.ToString();
+            _dKills.text = s.kills.ToString();
+            _dTime.text = Mathf.Floor(s.time) + "s";
+            _dDps.text = Mathf.Round(s.damageDealt / Mathf.Max(s.time, 1f)).ToString();
+            _dTaken.text = Mathf.Round(s.damageTaken).ToString();
+            _dSeed.text = $"Co-op record: {SaveSystem.CoopWins}W · {SaveSystem.CoopLosses}L";
+            if (_endEyebrow != null) _endEyebrow.text = draw ? "Both Fell" : won ? "Last One Standing" : "Outlasted";
+            if (_endBig != null) { _endBig.text = draw ? "DRAW" : won ? "WINNER" : "DEFEATED"; _endBig.style.color = won ? Palette.Dna : Palette.Ink; }
+            var partner = g.Partner();
+            _dMuts.text = partner != null
+                ? $"Partner — Lv {partner.level} · {(draw ? "fell together" : won ? "fell first" : "survived")}"
+                : "";
+            var replayC = _root.Q<Button>("replayBtn"); if (replayC != null) replayC.style.display = DisplayStyle.None; // no solo-replay from a co-op result
             Show(_deathOverlay);
         }
 
@@ -612,7 +752,12 @@ namespace Mutagen
             _joyActive = true; _joyPointerId = e.pointerId;
             _joyStart = new Vector2(e.localPosition.x, e.localPosition.y);
             _touchLayer.CapturePointer(e.pointerId);
-            if (_joyBase != null) { _joyBase.style.display = DisplayStyle.Flex; _joyBase.style.left = _joyStart.x - 75f; _joyBase.style.top = _joyStart.y - 75f; }
+            if (_joyBase != null)
+            {
+                // Position the base in the hud's space so it lands under the finger in either handedness.
+                Vector2 hp = _touchLayer.ChangeCoordinatesTo(_joyBase.parent, _joyStart);
+                _joyBase.style.display = DisplayStyle.Flex; _joyBase.style.left = hp.x - 75f; _joyBase.style.top = hp.y - 75f;
+            }
             SetKnob(Vector2.zero);
             TouchInput.Move = Vector2.zero;
             e.StopPropagation();
@@ -655,6 +800,7 @@ namespace Mutagen
             {
                 if (TouchInput.IsTouchDevice) _root.AddToClassList("mobile"); else _root.RemoveFromClassList("mobile");
             }
+            ApplyLeftHanded();
             if (!active) EndJoy();
         }
 
@@ -714,12 +860,45 @@ namespace Mutagen
             if (_volMaster != null) _volMaster.SetValueWithoutNotify(Sfx.MasterVol * 100f);
             if (_volMusic != null) _volMusic.SetValueWithoutNotify(Sfx.MusicVol * 100f);
             if (_volSfx != null) _volSfx.SetValueWithoutNotify(Sfx.SfxVol * 100f);
-            RenderBinds();
+            SyncSettingsUI();
             Show(_settingsOverlay);
             _settingsOverlay?.BringToFront(); // render above the menu
         }
 
         public void HideSettings() { Binds.Rebinding = null; Hide(_settingsOverlay); }
+
+        // ---------------------------------------------------------------- game mode (seed + campaign/endless)
+        public void ShowGameMode() { Show(_gameModeOverlay); _gameModeOverlay?.BringToFront(); }
+        public void HideGameMode() { Hide(_gameModeOverlay); }
+
+        // ---------------------------------------------------------------- co-op (online)
+        public void ShowCoop() { Show(_coopOverlay); _coopOverlay?.BringToFront(); }
+        public void HideCoop() { Hide(_coopOverlay); }
+
+        static void SyncToggle(Button b, bool on, string label)
+        {
+            if (b == null) return;
+            b.text = label + ": " + (on ? "On" : "Off");
+            if (on) b.AddToClassList("on"); else b.RemoveFromClassList("on");
+        }
+
+        // Refresh every settings toggle from current state (called on bind + each time settings opens).
+        void SyncSettingsUI()
+        {
+            SyncSound();
+            SyncToggle(_hapticsToggle, Haptics.Enabled, "Vibration");
+            SyncToggle(_shakeToggle, GameSettings.ScreenShake, "Screen Shake");
+            SyncToggle(_autoToggle, _autocast, "Auto-cast");
+            SyncToggle(_perfToggle, GameSettings.ReducedEffects, "Reduced FX");
+            SyncToggle(_handToggle, GameSettings.LeftHanded, "Left-Handed");
+            if (_clearDataBtn != null) _clearDataBtn.text = "Clear Monster Archive";
+        }
+
+        void ApplyLeftHanded()
+        {
+            if (_hud == null) return;
+            if (GameSettings.LeftHanded) _hud.AddToClassList("lefthanded"); else _hud.RemoveFromClassList("lefthanded");
+        }
 
         // ---------------------------------------------------------------- synergy codex
         public void ShowCodex() { RenderCodex(); Show(_codexOverlay); _codexOverlay?.BringToFront(); }
@@ -737,7 +916,7 @@ namespace Mutagen
                 if (p != null && d.active(p)) row.AddToClassList("active");
 
                 var head = new VisualElement(); head.AddToClassList("codexhead"); row.Add(head);
-                var name = new Label("⚡ " + d.name); name.AddToClassList("synname"); head.Add(name);
+                var name = new Label(d.name); name.AddToClassList("synname"); head.Add(name);
                 var cat = new Label(d.category); cat.AddToClassList("syncat"); head.Add(cat);
 
                 var recipe = new Label(d.recipe); recipe.AddToClassList("synrecipe"); row.Add(recipe);
@@ -836,7 +1015,7 @@ namespace Mutagen
         }
 
         public void ShowStart() => Show(_startOverlay);
-        public void HideStart() => Hide(_startOverlay);
+        public void HideStart() { Hide(_startOverlay); Hide(_coopOverlay); }
 
         // ---------------------------------------------------------------- debug / misc
         public void SetDebugVisible(bool v) { if (v) Show(_debug); else Hide(_debug); }
@@ -851,6 +1030,11 @@ namespace Mutagen
         public void RefreshGodBtn()
         {
             var b = _root?.Q<Button>("dbgGod"); if (b != null) b.text = "God: " + (_game.god ? "on" : "off");
+        }
+
+        public void RefreshCoopBtn()
+        {
+            var b = _root?.Q<Button>("dbgCoop"); if (b != null) b.text = "Co-op: " + (_game.coop ? "on" : "off");
         }
 
         public void SyncSound()

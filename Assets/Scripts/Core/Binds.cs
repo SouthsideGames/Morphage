@@ -22,7 +22,7 @@ namespace Mutagen
             { "up", Key.W }, { "down", Key.S }, { "left", Key.A }, { "right", Key.D },
             { "dash", Key.LeftShift }, { "reroll", Key.R },
             { "move1", Key.Digit1 }, { "move2", Key.Digit2 }, { "move3", Key.Digit3 }, { "move4", Key.Digit4 },
-            { "mute", Key.M }, { "debug", Key.Backquote },
+            { "mute", Key.M }, { "debug", Key.Tab },
         };
 
         public static Dictionary<string, Key> Current = new(Default);

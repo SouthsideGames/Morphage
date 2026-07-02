@@ -13,12 +13,17 @@ namespace Mutagen
         const float TAU = Mathf.PI * 2f;
 
         public float x, y, r;
+        public int index;          // 0..1 — which hero this is
+        public bool isBot;         // true = locally-driven throwaway bot (loopback test only)
+        public bool alive => hp > 0f;
         public float baseSpeed, speed, maxHp, hp;
         public int level;
         public float xp, xpNext, dna;
         public float atkDmg, dnaRange, regen, spikeDmg, poisonDps;
         public Dictionary<string, int> mutations = new();
         public HashSet<string> evolved = new();
+        public List<MutationDef> draftOptions; // co-op: active upgrade choices awaiting a pick
+        public int pendingDrafts;              // co-op: banked level-ups awaiting picks
         public float facingX = 1f, facingY = 0f;
         public float hurtFlash;
         public List<Clone> clones = new();
@@ -87,7 +92,7 @@ namespace Mutagen
                     reviveCharges--; hp = maxHp * 0.5f; invuln = 1.5f;
                     game.AddFloater(x, y + r, "SECOND WIND", Palette.Dna, 18f); game.Shake(8f);
                 }
-                else { hp = 0f; game.GameOver(); }
+                else { hp = 0f; game.OnPlayerDowned(this); }
             }
         }
 
@@ -99,7 +104,7 @@ namespace Mutagen
             {
                 xp -= xpNext; level++;
                 xpNext = Mathf.Floor(8f + level * 4f + level * (float)level * 0.6f);
-                game.OnLevelUp();
+                game.OnLevelUp(this);
             }
         }
 
@@ -143,7 +148,7 @@ namespace Mutagen
                 var e = es[i]; float dx = e.x - x, dy = e.y - y, d = Mathf.Sqrt(dx * dx + dy * dy);
                 if (d > range + e.r) continue;
                 float da = Mathf.Atan2(Mathf.Sin(Mathf.Atan2(dy, dx) - baseA), Mathf.Cos(Mathf.Atan2(dy, dx) - baseA));
-                if (Mathf.Abs(da) < arc / 2f + 0.2f) e.Hurt(dmg, game, Mathf.Cos(baseA) * 8f, Mathf.Sin(baseA) * 8f);
+                if (Mathf.Abs(da) < arc / 2f + 0.2f) e.Hurt(dmg, game, this, Mathf.Cos(baseA) * 8f, Mathf.Sin(baseA) * 8f);
             }
         }
 
@@ -164,7 +169,7 @@ namespace Mutagen
                 if (Mathf.Abs(da) < half + 0.15f)
                 {
                     float mult = (burn && Has("venom") && e.poisonT > 0f) ? 1.5f : 1f; // Wildfire
-                    e.Hurt(dmg * mult, game, Mathf.Cos(baseA) * 6f, Mathf.Sin(baseA) * 6f);
+                    e.Hurt(dmg * mult, game, this, Mathf.Cos(baseA) * 6f, Mathf.Sin(baseA) * 6f);
                     if (burn) e.ApplyPoison(6f + atkDmg * 0.2f);
                 }
             }
@@ -183,7 +188,7 @@ namespace Mutagen
                 float px = x + dx0 * len * t, py = y + dy0 * len * t;
                 if (Rng.Dist2(e.x, e.y, px, py) < (e.r + 12f) * (e.r + 12f))
                 {
-                    e.Hurt(dmg, game);
+                    e.Hurt(dmg, game, this);
                     if (poisonDps != 0f) e.ApplyPoison(poisonDps);
                 }
             }
@@ -195,7 +200,7 @@ namespace Mutagen
         {
             AimNearest(game);
             float a = Mathf.Atan2(facingY, facingX); const float sp = 560f;
-            game.AddProjectile(x, y, Mathf.Cos(a) * sp, Mathf.Sin(a) * sp, true, dmg, color, 6f, 1.4f, poison);
+            game.AddProjectile(x, y, Mathf.Cos(a) * sp, Mathf.Sin(a) * sp, true, dmg, color, 6f, 1.4f, poison, this);
             Vfx.Spawn("PoisonCloud", x, y, 26f);
         }
 
@@ -206,7 +211,7 @@ namespace Mutagen
             for (int i = 0; i < n; i++)
             {
                 float a = baseA + (i - (n - 1) / 2f) * (span / Mathf.Max(1, n - 1));
-                game.AddProjectile(x, y, Mathf.Cos(a) * sp, Mathf.Sin(a) * sp, true, dmg, color, 5f, 1.2f);
+                game.AddProjectile(x, y, Mathf.Cos(a) * sp, Mathf.Sin(a) * sp, true, dmg, color, 5f, 1.2f, 0f, this);
             }
         }
 
@@ -224,7 +229,7 @@ namespace Mutagen
                 if (Rng.Dist2(x, y, e.x, e.y) < (radius + e.r) * (radius + e.r))
                 {
                     float dx = e.x - x, dy = e.y - y, d = Mathf.Sqrt(dx * dx + dy * dy); if (d == 0f) d = 1f;
-                    e.Hurt(dmg, game, dx / d * knock, dy / d * knock);
+                    e.Hurt(dmg, game, this, dx / d * knock, dy / d * knock);
                 }
             }
         }
@@ -242,7 +247,7 @@ namespace Mutagen
 
         public void Mitosis(Game game, int count)
         {
-            for (int i = 0; i < count; i++) { var c = new Clone(this, Fx.Rand(0f, TAU)) { life = 8f }; clones.Add(c); }
+            for (int i = 0; i < count; i++) { var c = new Clone(this, Rng.Rand(0f, TAU)) { life = 8f }; clones.Add(c); }
             for (int i = 0; i < 16; i++) { float a = Fx.Rand(0f, TAU); game.AddParticle(x, y, Mathf.Cos(a) * 160f, Mathf.Sin(a) * 160f, .4f, Palette.CloneBody, 4f); }
         }
 
@@ -253,7 +258,7 @@ namespace Mutagen
             for (int i = 0; i < n; i++)
             {
                 float a = i / (float)n * TAU;
-                game.AddProjectile(x, y, Mathf.Cos(a) * sp, Mathf.Sin(a) * sp, true, dmg, color, 5f, 1.0f);
+                game.AddProjectile(x, y, Mathf.Cos(a) * sp, Mathf.Sin(a) * sp, true, dmg, color, 5f, 1.0f, 0f, this);
             }
             Vfx.Spawn("Poof", x, y, 24f);
         }
@@ -275,7 +280,7 @@ namespace Mutagen
                 if (proj < 0f || proj > range) continue;
                 float px = x + dx0 * proj, py = y + dy0 * proj;
                 if (Rng.Dist2(e.x, e.y, px, py) < (e.r + width) * (e.r + width))
-                    e.Hurt(dmg, game, dx0 * 6f, dy0 * 6f);
+                    e.Hurt(dmg, game, this, dx0 * 6f, dy0 * 6f);
             }
             Vfx.Spawn("Explosion", x + dx0 * range * 0.6f, y + dy0 * range * 0.6f, 16f);
         }
@@ -295,7 +300,7 @@ namespace Mutagen
                 var e = es[i]; float dx = e.x - x, dy = e.y - y, d = Mathf.Sqrt(dx * dx + dy * dy);
                 if (d > range + e.r) continue;
                 float da = Mathf.Atan2(Mathf.Sin(Mathf.Atan2(dy, dx) - baseA), Mathf.Cos(Mathf.Atan2(dy, dx) - baseA));
-                if (Mathf.Abs(da) < half + 0.15f) { e.Hurt(dmg, game); e.ApplySlow(0.5f, 2f); }
+                if (Mathf.Abs(da) < half + 0.15f) { e.Hurt(dmg, game, this); e.ApplySlow(0.5f, 2f); }
             }
         }
 
@@ -316,7 +321,7 @@ namespace Mutagen
                 }
                 if (best == null) break;
                 game.AddBeam(cx, cy, best.x, best.y, color);
-                best.Hurt(dmg, game);
+                best.Hurt(dmg, game, this);
                 hit.Add(best); cx = best.x; cy = best.y;
             }
         }
@@ -339,7 +344,7 @@ namespace Mutagen
                 if (Mathf.Abs(da) < 0.7f)
                 {
                     float pull = Mathf.Min(d - 20f, 90f); if (pull < 0f) pull = 0f;
-                    e.Hurt(dmg, game, -dx / d * pull, -dy / d * pull);
+                    e.Hurt(dmg, game, this, -dx / d * pull, -dy / d * pull);
                     e.ApplySlow(0.7f, 1f);
                 }
             }
@@ -359,7 +364,7 @@ namespace Mutagen
                 var e = es[i]; float dx = e.x - x, dy = e.y - y, d = Mathf.Sqrt(dx * dx + dy * dy); if (d == 0f) d = 1f;
                 if (d > radius + e.r) continue;
                 float pull = Mathf.Min(d, 70f);
-                e.Hurt(dmg, game, -dx / d * pull, -dy / d * pull);
+                e.Hurt(dmg, game, this, -dx / d * pull, -dy / d * pull);
                 e.ApplySlow(0.6f, 1.2f);
             }
             Vfx.Spawn("Poof", x, y, radius * 0.5f);
@@ -380,7 +385,7 @@ namespace Mutagen
                 if (Rng.Dist2(x, y, e.x, e.y) < (radius + e.r) * (radius + e.r))
                 {
                     float dx = e.x - x, dy = e.y - y, d = Mathf.Sqrt(dx * dx + dy * dy); if (d == 0f) d = 1f;
-                    e.Hurt(dmg, game, dx / d * 14f, dy / d * 14f); e.ApplySlow(0.6f, 1.5f);
+                    e.Hurt(dmg, game, this, dx / d * 14f, dy / d * 14f); e.ApplySlow(0.6f, 1.5f);
                 }
             }
             Vfx.Spawn("Poof", x, y, radius * 0.5f);
@@ -393,7 +398,7 @@ namespace Mutagen
             var t = game.NearestEnemy(x, y, 99999f);
             float zx = t != null ? t.x : x + facingX * 70f;
             float zy = t != null ? t.y : y + facingY * 70f;
-            game.AddHazard(zx, zy, radius, dps, life, pull, slowMul, poison, color);
+            game.AddHazard(zx, zy, radius, dps, life, pull, slowMul, poison, color, this);
             Vfx.Spawn("Poof", zx, zy, radius * 0.4f);
         }
 
@@ -439,7 +444,7 @@ namespace Mutagen
                     {
                         var e = es[i];
                         if (!_chargeHits.Contains(e) && Rng.Dist2(x, y, e.x, e.y) < (r + e.r + 4f) * (r + e.r + 4f))
-                        { _chargeHits.Add(e); e.Hurt(chargeDmg, game, facingX * 16f, facingY * 16f); }
+                        { _chargeHits.Add(e); e.Hurt(chargeDmg, game, this, facingX * 16f, facingY * 16f); }
                     }
                 }
                 if (dashTime <= 0f) { dashing = false; chargeDmg = 0f; _chargeHits = null; }
@@ -465,7 +470,9 @@ namespace Mutagen
                 if (Fx.Chance(dt * 3f)) game.AddParticle(x + Fx.Rand(-10f, 10f), y + r, 0f, 30f, .5f, Palette.Regen, 2f);
             }
 
-            if (game.autocast) for (int s = 0; s < 4; s++) UseMove(s, game);
+            // isBot auto-fires ONLY as the solo loopback bot; a networked remote hero fires from the
+            // input packets it receives (see Game.Step), so don't auto-cast it in co-op.
+            if (game.autocast || (isBot && !Net.CoopNet.Connected)) for (int s = 0; s < 4; s++) UseMove(s, game);
 
             for (int i = 0; i < clones.Count; i++) clones[i].Update(dt, game);
             clones.RemoveAll(c => c.dead);

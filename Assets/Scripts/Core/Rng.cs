@@ -13,6 +13,7 @@ namespace Mutagen
         static uint _state;
 
         public static void Set(uint seed) => _state = seed;
+        public static uint State => _state; // for determinism checksums / netcode resync
 
         // mulberry32 — bit-for-bit match with the JS version (uint arithmetic == Math.imul truncation).
         public static float Next()

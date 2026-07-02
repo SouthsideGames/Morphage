@@ -27,7 +27,7 @@
                 </ui:VisualElement>
             </ui:VisualElement>
             <ui:VisualElement name="muts" class="muts"/>
-            <ui:Label class="hint" text="WASD move · 1-4 moves · SHIFT dash · R reroll · ` debug"/>
+            <ui:Label class="hint" text="WASD move · 1-4 moves · SHIFT dash · R reroll · TAB debug"/>
             <ui:Button name="pauseBtn" class="pausebtn" text="❚❚"/>
             <ui:Label name="banner" class="banner"/>
             <ui:VisualElement name="touchLayer" class="touchlayer"/>
@@ -53,6 +53,8 @@
                 <ui:Button name="dbgExploder" text="+Bloater"/>
                 <ui:Button name="dbgSlow" text="Slow-mo"/>
                 <ui:Button name="dbgTouch" text="Touch UI"/>
+                <ui:Button name="dbgDeterm" text="V"/>
+                <ui:Button name="dbgCoop" text="Co-op: off"/>
             </ui:VisualElement>
         </ui:VisualElement>
 
@@ -98,7 +100,7 @@
             <ui:Label class="big" text="Paused"/>
             <ui:VisualElement class="btnrow">
                 <ui:Button name="resumeBtn" text="Resume ▸" class="btn"/>
-                <ui:Button name="pauseCodexBtn" text="⚡ Synergies" class="btn ghost"/>
+                <ui:Button name="pauseCodexBtn" text="Synergies" class="btn ghost"/>
                 <ui:Button name="pauseMenuBtn" text="Main Menu" class="btn ghost"/>
             </ui:VisualElement>
         </ui:VisualElement>
@@ -123,40 +125,72 @@
 
         <!-- ===== Settings (audio + keybinds) ===== -->
         <ui:VisualElement name="settingsOverlay" class="overlay">
-            <ui:Label class="eyebrow" text="Configure"/>
             <ui:Label class="big" text="Settings"/>
             <ui:VisualElement class="settingsbox">
+                <ui:VisualElement class="togglerow">
+                    <ui:Button name="soundToggle" text="Sound on" class="toggle on"/>
+                    <ui:Button name="hapticsToggle" text="Vibration: On" class="toggle on"/>
+                    <ui:Button name="shakeToggle" text="Screen Shake: On" class="toggle on"/>
+                    <ui:Button name="autoToggle" text="Auto-cast: Off" class="toggle"/>
+                    <ui:Button name="perfToggle" text="Reduced FX: Off" class="toggle"/>
+                    <ui:Button name="handToggle" text="Left-Handed: Off" class="toggle"/>
+                </ui:VisualElement>
                 <ui:VisualElement class="srow"><ui:Label class="slabel" text="Master"/><ui:Slider name="volMaster" low-value="0" high-value="100" value="70" class="sslider"/></ui:VisualElement>
                 <ui:VisualElement class="srow"><ui:Label class="slabel" text="Music"/><ui:Slider name="volMusic" low-value="0" high-value="100" value="50" class="sslider"/></ui:VisualElement>
                 <ui:VisualElement class="srow"><ui:Label class="slabel" text="SFX"/><ui:Slider name="volSfx" low-value="0" high-value="100" value="80" class="sslider"/></ui:VisualElement>
-                <ui:Label class="slabel" text="Keybinds — click a key, then press the new one (Esc cancels)"/>
-                <ui:VisualElement name="bindList" class="bindlist"/>
                 <ui:VisualElement class="btnrow">
-                    <ui:Button name="bindReset" text="Reset Keys" class="btn ghost"/>
+                    <ui:Button name="clearDataBtn" text="Clear Monster Archive" class="btn ghost"/>
                     <ui:Button name="settingsDone" text="Done" class="btn"/>
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <!-- ===== Game mode (seed + campaign/endless) ===== -->
+        <ui:VisualElement name="gameModeOverlay" class="overlay">
+            <ui:Label class="eyebrow" text="Configure Run"/>
+            <ui:Label class="big" text="Game Mode"/>
+            <ui:VisualElement class="settingsbox">
+                <ui:Label class="slabel" text="Run seed — leave blank for random"/>
+                <ui:TextField name="seedField" class="seedinput"/>
+                <ui:VisualElement class="togglerow">
+                    <ui:Button name="modeToggle" text="Campaign · 15 waves" class="toggle"/>
+                </ui:VisualElement>
+                <ui:VisualElement class="btnrow">
+                    <ui:Button name="gameModeDone" text="Done" class="btn"/>
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <!-- ===== Co-op (online) ===== -->
+        <ui:VisualElement name="coopOverlay" class="overlay">
+            <ui:Label class="eyebrow" text="Play Together"/>
+            <ui:Label class="big" text="Co-op"/>
+            <ui:VisualElement class="settingsbox">
+                <ui:Label class="sub" text="Host a game to get a share code, or paste a friend's code to join."/>
+                <ui:Button name="hostBtn" text="Host Game" class="btn"/>
+                <ui:Label class="slabel" text="Join code"/>
+                <ui:TextField name="coopCodeField" class="seedinput"/>
+                <ui:Button name="joinBtn" text="Join Game" class="btn ghost"/>
+                <ui:Label name="netStatus" class="sub"/>
+                <ui:VisualElement class="btnrow">
+                    <ui:Button name="coopDone" text="Done" class="btn ghost"/>
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
 
         <!-- ===== Main menu ===== -->
         <ui:VisualElement name="startOverlay" class="overlay">
-            <ui:Label class="eyebrow" text="Roguelike Evolution Arena"/>
-            <ui:Label class="big menutitle" text="MORPHAGE"/>
+            <ui:Label name="menuTitle" class="big menutitle" text="MORPHAGE"/>
             <ui:VisualElement class="menucard">
-                <ui:Label class="sub" text="An unstable organism in a hostile petri dish. Survive the waves, absorb DNA, draft mutations, become monstrous."/>
-                <ui:VisualElement class="field">
-                    <ui:Label class="label" text="Run seed — leave blank for random"/>
-                    <ui:TextField name="seedField" class="seedinput"/>
-                </ui:VisualElement>
-                <ui:VisualElement class="togglerow">
-                    <ui:Button name="soundToggle" text="Sound on" class="toggle on"/>
-                    <ui:Button name="modeToggle" text="Campaign · 15 waves" class="toggle"/>
-                    <ui:Button name="autoToggle" text="Auto-cast: Off" class="toggle"/>
-                    <ui:Button name="codexBtn" text="⚡ Synergies" class="toggle"/>
-                    <ui:Button name="galleryBtn" text="🧬 Monsters" class="toggle"/>
-                    <ui:Button name="settingsBtn" text="⚙ Settings" class="toggle"/>
-                </ui:VisualElement>
+                <ui:Label class="sub" text="Survive the waves, absorb DNA, draft mutations, become monstrous."/>
                 <ui:Button name="beginBtn" text="Begin Run ▸" class="btn"/>
+                <ui:VisualElement class="togglerow">
+                    <ui:Button name="gameModeBtn" text="Game Mode" class="toggle"/>
+                    <ui:Button name="coopMenuBtn" text="Co-op" class="toggle"/>
+                    <ui:Button name="settingsBtn" text="Settings" class="toggle"/>
+                    <ui:Button name="codexBtn" text="Synergies" class="toggle"/>
+                    <ui:Button name="galleryBtn" text="Monsters" class="toggle"/>
+                </ui:VisualElement>
                 <ui:Label class="ver" text="PROTOTYPE v0.2 · port"/>
             </ui:VisualElement>
         </ui:VisualElement>

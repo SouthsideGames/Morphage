@@ -34,7 +34,7 @@ namespace Mutagen
                 float dx = t.x - x, dy = t.y - y, d = Mathf.Sqrt(dx * dx + dy * dy); if (d == 0f) d = 1f;
                 const float sp = 480f;
                 float dmg = player.atkDmg * (player.clonesBuffed ? 0.6f : 0.45f);
-                game.AddProjectile(x, y, dx / d * sp, dy / d * sp, true, dmg, Palette.CloneShot, 4f, 1f, player.poisonDps);
+                game.AddProjectile(x, y, dx / d * sp, dy / d * sp, true, dmg, Palette.CloneShot, 4f, 1f, player.poisonDps, player);
             }
         }
     }

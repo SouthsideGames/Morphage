@@ -49,9 +49,9 @@ namespace Mutagen
             return this;
         }
 
-        public void Hurt(float amount, Game game, float kx = 0f, float ky = 0f, bool silent = false)
+        public void Hurt(float amount, Game game, Player src, float kx = 0f, float ky = 0f, bool silent = false)
         {
-            var pl = game.player;
+            var pl = src; // damage source — crit/synergy/lifesteal attribute to the shooter, not always game.player
             bool crit = pl != null && pl.critChance > 0f && Rng.Next() < pl.critChance; // Unstable Cells (seeded)
             if (crit) amount *= pl.critMult;
             if (pl != null)
@@ -79,7 +79,7 @@ namespace Mutagen
                     big ? Palette.FloaterBig : Palette.FloaterWhite, big ? 20f : 14f);
                 Sfx.Hit();
             }
-            if (hp <= 0f && !dead) Die(game);
+            if (hp <= 0f && !dead) Die(game, pl);
         }
 
         public void ApplyPoison(float dps) { poison = Mathf.Max(poison, dps); poisonT = Mathf.Max(poisonT, 3f); }
@@ -87,10 +87,10 @@ namespace Mutagen
         /// <summary>Slow movement to <paramref name="mul"/>× for <paramref name="dur"/>s (strongest active slow wins).</summary>
         public void ApplySlow(float mul, float dur) { slowMul = slowT > 0f ? Mathf.Min(slowMul, mul) : mul; slowT = Mathf.Max(slowT, dur); }
 
-        public void Die(Game game)
+        public void Die(Game game, Player killer = null)
         {
             dead = true; game.stats.kills++; game.Shake(cfg.boss ? 16f : 4f);
-            if (game.player != null && game.player.healPerKill > 0f) game.player.Heal(game.player.healPerKill); // Carnivore
+            if (killer != null && killer.healPerKill > 0f) killer.Heal(killer.healPerKill); // Carnivore (heals the actual killer)
             game.hitstop = Mathf.Max(game.hitstop, cfg.boss ? 0.18f : 0.03f);
             Sfx.Death();
             // Punchy explosion only for big/elite/boss kills — trash mobs keep the cheap procedural spray.
@@ -137,7 +137,7 @@ namespace Mutagen
         public void Update(float dt, Game game)
         {
             scale = Mathf.Min(1f, scale + dt * 5f); t += dt; if (hitFlash > 0f) hitFlash -= dt;
-            var p = game.player;
+            var p = game.NearestPlayer(x, y); if (p == null) return; // all heroes down — run is ending
             float dx = p.x - x, dy = p.y - y, d = Mathf.Sqrt(dx * dx + dy * dy); if (d == 0f) d = 1f; dx /= d; dy /= d;
             float slow = (poisonT > 0f && p.necrosis) ? 0.55f : 1f;
             if (slowT > 0f) { slowT -= dt; slow *= slowMul; if (slowT <= 0f) slowMul = 1f; }
@@ -191,7 +191,7 @@ namespace Mutagen
                 if (Rng.Dist2(x, y, p.x, p.y) < rr * rr && contactCd <= 0f)
                 {
                     p.Hurt(dmg, game); contactCd = 0.5f;
-                    if (p.HasMove("tailswipe") || p.Has("quills")) Hurt(p.SpikeDamage(), game); // reflect (Tail Swipe / Quills)
+                    if (p.HasMove("tailswipe") || p.Has("quills")) Hurt(p.SpikeDamage(), game, p); // reflect (Tail Swipe / Quills)
                     if (cfg.explode) Die(game);
                 }
             }

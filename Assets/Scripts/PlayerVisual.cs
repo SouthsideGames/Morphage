@@ -87,7 +87,7 @@ namespace Mutagen
             return sr;
         }
 
-        public void Sync(Player p, bool show)
+        public void Sync(Player p, bool show, Color? tint = null)
         {
             if (gameObject.activeSelf != show) gameObject.SetActive(show);
             if (!show || p == null) return;
@@ -107,11 +107,13 @@ namespace Mutagen
             if (blk > 0) bodyCol = Color.Lerp(bodyCol, Palette.BulkTone, Mathf.Min(0.40f, 0.14f * blk));
             float bodyA = 1f;
             if (p.Has("glasscannon")) { bodyCol = Color.Lerp(bodyCol, Palette.GlassTint, 0.18f); bodyA = 0.72f; } // brittle, translucent
+            if (tint.HasValue) bodyCol = Color.Lerp(bodyCol, tint.Value, 0.55f); // co-op: distinguish the partner hero
             if (flash) { bodyCol = Palette.HurtRed; bodyA = 1f; }
             bodyCol.a = bodyA;
             Circle(_body, 0, 0, r, bodyCol);
 
             Color g = p.HasMove("firebreath") ? Palette.FireGlow : Palette.Dna;
+            if (tint.HasValue) g = tint.Value;
             Circle(_glow, 0, 0, r * 1.7f, new Color(g.r, g.g, g.b, 0.5f));
 
             Toggle(_aura, p.HasMove("venom")); if (p.HasMove("venom")) Circle(_aura, 0, 0, r * 0.7f, Palette.PoisonAura);

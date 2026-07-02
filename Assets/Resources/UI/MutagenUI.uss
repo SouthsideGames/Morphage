@@ -88,7 +88,7 @@
 .cardstk { font-size: 10px; margin-top: 8px; }
 
 /* ---------- buttons ---------- */
-.btn { font-size: 14px; letter-spacing: 2px; -unity-font-style: bold; color: rgb(6,20,15); background-color: var(--dna); border-width: 0; padding: 15px 36px; border-radius: 30px; margin: 8px; }
+.btn { font-size: 14px; letter-spacing: 2px; -unity-font-style: bold; color: rgb(6,20,15); background-color: var(--dna); border-width: 0; padding: 15px 36px; border-radius: 10px; margin: 8px; }
 .btn:hover { background-color: var(--xp); }
 .btn.ghost { background-color: rgba(0,0,0,0); border-width: 1px; border-color: var(--line); color: var(--ink); }
 .btnrow { flex-direction: row; justify-content: center; margin-top: 18px; }
@@ -106,12 +106,12 @@
     background-color: rgba(10,24,21,0.72); border-width: 1px; border-color: var(--line);
     border-radius: 18px; padding: 20px 30px; margin-top: 8px; }
 .field { width: 100%; margin: 10px 0 4px 0; }
-.seedinput { font-size: 15px; margin-top: 6px; }
+.seedinput { font-size: 15px; margin-top: 6px; color: var(--ink); }
 .seedinput .unity-text-field__input { min-height: 40px; padding: 0 14px; border-radius: 10px;
-    background-color: rgba(255,255,255,0.05); border-color: var(--line); }
+    background-color: rgba(255,255,255,0.05); border-color: var(--line); color: var(--ink); }
 .togglerow { flex-direction: row; flex-wrap: wrap; justify-content: center; margin: 8px 0; }
-.toggle { font-size: 13px; color: var(--muted); background-color: rgba(255,255,255,0.05);
-    border-width: 1px; border-color: var(--line); border-radius: 24px; padding: 10px 18px; margin: 5px; }
+.toggle { font-size: 12px; color: var(--muted); background-color: rgba(255,255,255,0.05);
+    border-width: 1px; border-color: var(--line); border-radius: 8px; padding: 7px 13px; margin: 4px; white-space: nowrap; }
 .toggle.on { color: var(--dna); border-color: var(--dna); }
 .ver { font-size: 10px; letter-spacing: 3px; color: var(--muted); opacity: 0.5; margin-top: 10px; }
 
@@ -196,6 +196,9 @@
 
 /* ---------- touch controls (mobile) ---------- */
 .touchlayer { position: absolute; left: 0; top: 0; bottom: 0; width: 50%; display: none; }
+/* Left-handed: joystick region on the right half, move diamond on the left. */
+.hud.lefthanded .touchlayer { left: auto; right: 0; }
+.hud.lefthanded .movebar.touch { left: 34px; right: auto; }
 .joybase { position: absolute; width: 150px; height: 150px; border-radius: 75px; display: none;
     border-width: 2px; border-color: rgba(95,245,176,0.4); background-color: rgba(95,245,176,0.06); }
 .joyknob { position: absolute; width: 62px; height: 62px; border-radius: 31px; left: 44px; top: 44px;
@@ -219,8 +222,8 @@
 .movebar.touch .dash  { top: 240px; left: 78px; }
 
 /* ---------- settings (audio + keybinds) ---------- */
-.settingsbox { width: 560px; max-width: 92%; align-items: stretch; background-color: rgba(10,24,21,0.72);
-    border-width: 1px; border-color: var(--line); border-radius: 18px; padding: 28px; margin-top: 14px; }
+.settingsbox { width: 620px; max-width: 95%; align-items: stretch; background-color: rgba(10,24,21,0.72);
+    border-width: 1px; border-color: var(--line); border-radius: 18px; padding: 18px 20px; margin-top: 14px; }
 .srow { flex-direction: row; align-items: center; margin-bottom: 10px; }
 .slabel { font-size: 12px; letter-spacing: 1px; color: var(--muted); -unity-font-style: bold; margin-top: 6px; margin-bottom: 6px; }
 .srow .slabel { width: 80px; margin-top: 0; margin-bottom: 0; }
