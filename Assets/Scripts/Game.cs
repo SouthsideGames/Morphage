@@ -186,14 +186,32 @@ namespace Mutagen
             _cam.backgroundColor = Palette.Abyss;
         }
 
+        SpriteRenderer _floorSr;
+
         void SetupFloor()
         {
             var go = new GameObject("Floor");
             go.transform.SetParent(_viewRoot, false);
-            var sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = SpriteFactory.MakeFloor((int)w, (int)h);
-            sr.sortingOrder = -100;
+            _floorSr = go.AddComponent<SpriteRenderer>();
+            _floorSr.sprite = SpriteFactory.MakeFloor((int)w, (int)h);
+            _floorSr.sortingOrder = -100;
             go.transform.position = new Vector3(w / 2f, h / 2f, 1f);
+        }
+
+        // Co-op: both peers must simulate the IDENTICAL arena. Each device fits the arena to its own
+        // screen at startup (phone ≠ tablet!), so the joiner adopts the host's dimensions here.
+        public void ApplyArena(float aw, float ah)
+        {
+            if (Mathf.Approximately(aw, w) && Mathf.Approximately(ah, h)) return;
+            w = aw; h = ah;
+            grid = new SpatialGrid(w, h);
+            SetupCamera(); // reframe to the new bounds (may letterbox on a different-shaped screen)
+            if (_floorSr != null)
+            {
+                _floorSr.sprite = SpriteFactory.MakeFloor((int)w, (int)h);
+                _floorSr.transform.position = new Vector3(w / 2f, h / 2f, 1f);
+            }
+            Debug.Log($"[MUTAGEN][net] arena set to {w:0}×{h:0} (host's dimensions)");
         }
 
         // ---------------------------------------------------------------- loop
@@ -950,7 +968,7 @@ namespace Mutagen
             _execTick = 0; _stallFrames = 0; _pendingDraftByte = 0; _nextCompareTick = 0; _desynced = false;
             _localBuf.Clear(); _localChecksums.Clear(); Net.CoopSync.ResetBuffer();
             for (int t = 0; t < InputDelay; t++) SampleAndSend(t, Vector2.zero, false, false, false, false, false);
-            ui.HideStart(); ui.HideEnd(); ui.HidePause();
+            ui.HideStart(); ui.HideEnd(); ui.HidePause(); ui.HideDesyncInfo();
             SetBanner("CO-OP · WAVE 1", null, Palette.Dna, 1.8f);
             state = GameState.Playing;
         }
@@ -985,9 +1003,10 @@ namespace Mutagen
                 if (local.hash != remoteHash && !_desynced)
                 {
                     _desynced = true;
-                    Debug.LogError($"[MUTAGEN][net] DESYNC at tick {_nextCompareTick}: local {local.hash:X16} vs peer {remoteHash:X16}\n"
-                                   + Net.StateSnap.Diff(local.snap, remoteSnap));
+                    string diff = Net.StateSnap.Diff(local.snap, remoteSnap);
+                    Debug.LogError($"[MUTAGEN][net] DESYNC at tick {_nextCompareTick}: local {local.hash:X16} vs peer {remoteHash:X16}\n" + diff);
                     SetBanner("DESYNC", "games drifted out of sync", Palette.HurtRed, 6f);
+                    ui.ShowDesyncInfo($"DESYNC · tick {_nextCompareTick} · arena {w:0}×{h:0}\n{diff}");
                 }
                 _localChecksums.Remove(_nextCompareTick);
                 Net.CoopSync.RemoveRemoteChecksum(_nextCompareTick);

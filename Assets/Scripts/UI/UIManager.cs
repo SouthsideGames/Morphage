@@ -23,7 +23,7 @@ namespace Mutagen
         Button _hapticsToggle, _shakeToggle, _clearDataBtn, _perfToggle, _handToggle;
         int _titleTaps;
         VisualElement _hpFill, _xpFill, _muts, _cards;
-        Label _hpTxt, _xpTxt, _lvlVal, _waveVal, _dnaVal, _partnerHp;
+        Label _hpTxt, _xpTxt, _lvlVal, _waveVal, _dnaVal, _partnerHp, _desyncInfo;
         // Co-op menu controls (bound from the coop overlay in UXML)
         Button _hostBtn, _joinBtn; TextField _codeField; Label _netStatus;
         Label _dWave, _dLvl, _dKills, _dTime, _dDps, _dTaken, _dMuts, _dSeed, _dbgInfo, _dbgTitle;
@@ -288,6 +288,18 @@ namespace Mutagen
             SyncSettingsUI();
 
             RefreshCoopBtn();
+
+            // On-screen desync diagnostic (devices don't have a visible console — screenshot this instead).
+            _desyncInfo = new Label();
+            _desyncInfo.style.position = Position.Absolute;
+            _desyncInfo.style.top = 40f;
+            _desyncInfo.style.left = 12f;
+            _desyncInfo.style.right = 12f;
+            _desyncInfo.style.color = new Color(1f, 0.4f, 0.4f);
+            _desyncInfo.style.backgroundColor = new Color(0f, 0f, 0f, 0.7f);
+            _desyncInfo.style.whiteSpace = WhiteSpace.Normal;
+            _desyncInfo.style.display = DisplayStyle.None;
+            _root.Add(_desyncInfo);
 
             // Partner health readout for co-op (top-right corner of the HUD). Hidden in single-player.
             _partnerHp = new Label();
@@ -1013,6 +1025,9 @@ namespace Mutagen
                 _bindList.Add(row);
             }
         }
+
+        public void ShowDesyncInfo(string text) { if (_desyncInfo != null) { _desyncInfo.text = text; Show(_desyncInfo); } }
+        public void HideDesyncInfo() => Hide(_desyncInfo);
 
         public void ShowStart() => Show(_startOverlay);
         public void HideStart() { Hide(_startOverlay); Hide(_coopOverlay); }

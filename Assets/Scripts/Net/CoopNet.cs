@@ -38,7 +38,9 @@ namespace Mutagen.Net
 
         const string SeedKey = "seed";
         const string AutocastKey = "autocast"; // gameplay-affecting setting — must match on both peers
+        const string ArenaWKey = "aw", ArenaHKey = "ah"; // arena is screen-fit per device — joiner must adopt the host's
         const int MaxPlayers = 2;
+        static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
 
         static async Task EnsureSignedIn()
         {
@@ -101,7 +103,9 @@ namespace Mutagen.Net
                 SessionProperties = new Dictionary<string, SessionProperty>
                 {
                     { SeedKey, new SessionProperty(seed, VisibilityPropertyOptions.Public) },
-                    { AutocastKey, new SessionProperty(game.autocast ? "1" : "0", VisibilityPropertyOptions.Public) }
+                    { AutocastKey, new SessionProperty(game.autocast ? "1" : "0", VisibilityPropertyOptions.Public) },
+                    { ArenaWKey, new SessionProperty(game.w.ToString("R", Inv), VisibilityPropertyOptions.Public) },
+                    { ArenaHKey, new SessionProperty(game.h.ToString("R", Inv), VisibilityPropertyOptions.Public) }
                 }
             }.WithRelayNetwork();
 
@@ -138,6 +142,11 @@ namespace Mutagen.Net
             game.seedText = seed;
             if (Session.Properties != null && Session.Properties.TryGetValue(AutocastKey, out var ac))
                 game.autocast = ac.Value == "1"; // adopt the host's gameplay settings (must match to stay in sync)
+            if (Session.Properties != null &&
+                Session.Properties.TryGetValue(ArenaWKey, out var aw) && Session.Properties.TryGetValue(ArenaHKey, out var ah) &&
+                float.TryParse(aw.Value, System.Globalization.NumberStyles.Float, Inv, out float arenaW) &&
+                float.TryParse(ah.Value, System.Globalization.NumberStyles.Float, Inv, out float arenaH))
+                game.ApplyArena(arenaW, arenaH); // simulate the host's exact arena (screen-fit differs per device)
             ReadyToStart = true; // localIndex + seed set — safe for CoopSync to auto-start now
             Status = $"Joined · seed {seed}";
             Debug.Log($"[MUTAGEN][net] Joined session {Session.Id}.   seed = {seed}");

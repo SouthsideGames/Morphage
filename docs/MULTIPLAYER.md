@@ -26,13 +26,20 @@
 - **Competitive finish ✅** — co-op is last-one-standing: first fall ends the run (`CoopEnd`), survivor = WINNER,
   fallen = DEFEATED (DRAW if same tick). Per-device W/L record in PlayerPrefs (`SaveSystem.CoopWins/Losses`).
   Menu cleaned up: real **Co-op** overlay (Host/Join by code); pause disabled in co-op.
-- **Still TODO (priority order):**
-  1. **Desync checksum + resync fallback** — periodic state hash compare; needed for real devices where IL2CPP
-     float math may differ across chips (MPPM shares one binary, so it can't surface cross-device drift).
-  2. **Disconnect / rematch handling** — tear down + cleanly re-host a session (a 2nd co-op game currently needs
-     an editor restart); handle a peer dropping mid-run.
-  3. **Test on two real phones** (only MPPM-tested so far). 4. Polish: compact non-blocking card panel, reroll,
-     loadout-full replace, surface the W/L record on the menu.
+- **Desync checksum ✅ (detection)** — every 30 ticks both peers exchange + compare a full-state hash and a
+  component snapshot (`StateSnap`); on mismatch the log AND an on-screen readout say which part diverged first.
+- **Match-config sync ✅** — the peers must run identical rules, so the host's session properties now carry:
+  seed, autocast, and **arena w×h** (each device fits the arena to its own screen at startup — an iPhone and an
+  iPad literally simulated different-sized arenas, which was the real-device desync; joiner now `ApplyArena`s
+  the host's dimensions). Co-op also forces `endless = true` (last-one-standing) and locks the sim-mutating
+  debug buttons while connected (each would desync). LESSON: any device-dependent init that feeds the sim
+  (screen fit, saved settings) must be propagated from the host.
+- **Disconnect handling ✅ (v1)** — peer drop (NGO disconnect callback or ~10s lockstep stall) ends the run as
+  "Opponent Left" — the remaining player WINS (rage-quit = loss). Fresh host/join tears down the previous
+  session (`TeardownPrevious`: leave session, NGO shutdown, re-register per-session message handlers).
+- **Still TODO:** resync fallback (auto-recover from desync — only worth building if desyncs persist after the
+  arena fix); rematch UX; verify on real devices post-arena-fix; polish (compact card panel, reroll, replace,
+  W/L on menu; iPad letterboxes the host-shaped arena in co-op — cosmetic).
 
 ---
 
