@@ -667,7 +667,9 @@ namespace Mutagen
                 s.RegisterCallback<ClickEvent>(_ =>
                 {
                     if (_game.state != GameState.Playing || _game.player == null) return;
-                    if (slot < 4) _game.player.UseMove(slot, _game); else _game.player.Dash(_game);
+                    // Queue instead of firing directly — the queue is what travels over the network in
+                    // co-op (a direct UseMove would act on this device only and desync the games).
+                    if (slot < 4) _game.QueueMove(slot); else _game.QueueDash();
                 });
                 _movebar.Add(s); _slots[i] = s;
             }

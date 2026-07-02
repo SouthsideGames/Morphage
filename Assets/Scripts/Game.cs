@@ -1036,6 +1036,11 @@ namespace Mutagen
         }
         public void GotoMenu() { ReleaseAll(); state = GameState.Menu; _paused = false; ui.HideEnd(); ui.HideDraft(); ui.HideReplace(); ui.HidePause(); ui.ShowStart(); }
 
+        // Touch/UI input entry points. MUST queue (not call UseMove/Dash directly): in co-op the queue
+        // is what rides the network packet, so a direct call would fire on this sim only → desync.
+        public void QueueMove(int slot) { if (state == GameState.Playing && slot >= 0 && slot < 4) _moveQueued[slot] = true; }
+        public void QueueDash() { if (state == GameState.Playing) _dashQueued = true; }
+
         public void TogglePause()
         {
             if (state != GameState.Playing || coop) return; // no pausing in co-op — it would freeze/desync the shared sim
