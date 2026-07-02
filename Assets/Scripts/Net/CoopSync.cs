@@ -15,7 +15,7 @@ namespace Mutagen.Net
     {
         const string InputMsg = "mtick";
         const string ChkMsg = "mchk";
-        bool _registered, _started;
+        bool _registered, _started, _callbacksHooked;
         Game _game;
 
         static readonly Dictionary<int, TickInput> _remoteBuf = new(); // partner inputs, keyed by tick
@@ -27,7 +27,13 @@ namespace Mutagen.Net
             var nm = NetworkManager.Singleton;
             if (nm == null || !nm.IsListening || nm.CustomMessagingManager == null) return;
 
-            if (!_registered)
+            if (!_callbacksHooked) // once per NetworkManager (it persists across sessions)
+            {
+                nm.OnClientConnectedCallback += id => Debug.Log($"[MUTAGEN][net] client connected: {id}");
+                nm.OnClientDisconnectCallback += id => Debug.LogWarning($"[MUTAGEN][net] client disconnected: {id}");
+                _callbacksHooked = true;
+            }
+            if (!_registered) // once per SESSION — the messaging manager is rebuilt on every new connection
             {
                 nm.CustomMessagingManager.RegisterNamedMessageHandler(InputMsg, OnInput);
                 nm.CustomMessagingManager.RegisterNamedMessageHandler(ChkMsg, OnChecksum);
@@ -43,6 +49,14 @@ namespace Mutagen.Net
                 EnsureGame()?.StartCoopRun();
                 Debug.Log("[MUTAGEN][net] co-op run started");
             }
+        }
+
+        /// <summary>Re-arm for a fresh host/join: clears buffers and lets the auto-start fire again.</summary>
+        public static void NewSession()
+        {
+            ResetBuffer();
+            var s = FindFirstObjectByType<CoopSync>();
+            if (s != null) { s._started = false; s._registered = false; }
         }
 
         // ---- remote input buffer (read by Game.Tick) ----

@@ -47,6 +47,25 @@ namespace Mutagen.Net
                 await AuthenticationService.Instance.SignInAnonymouslyAsync();
         }
 
+        // Cleanly leave any previous session + shut down the old NGO connection before starting a new
+        // one. Without this, stale state from an earlier co-op game blocks the next run from starting.
+        static async Task TeardownPrevious()
+        {
+            if (Session != null)
+            {
+                try { await Session.LeaveAsync(); }
+                catch (System.Exception e) { Debug.LogWarning("[MUTAGEN][net] leaving old session: " + e.Message); }
+                Session = null;
+            }
+            var nm = NetworkManager.Singleton;
+            if (nm != null && (nm.IsListening || nm.ShutdownInProgress))
+            {
+                nm.Shutdown();
+                while (nm.ShutdownInProgress) await Task.Yield();
+            }
+            CoopSync.NewSession();
+        }
+
         // The Sessions relay integration drives NGO's NetworkManager.Singleton (it starts host/client
         // for us). We use NO NetworkObjects — NGO is only the connection + messaging pipe — so a bare
         // NetworkManager + UnityTransport is all it needs. Singleton self-assigns when the component enables.
@@ -70,6 +89,7 @@ namespace Mutagen.Net
             Debug.Log("[MUTAGEN][net] Host: signing in…");
             await EnsureSignedIn();
             EnsureNetworkManager();
+            await TeardownPrevious();
 
             Status = "Creating game…";
             Debug.Log("[MUTAGEN][net] Host: creating session…");
@@ -101,6 +121,7 @@ namespace Mutagen.Net
             Debug.Log("[MUTAGEN][net] Join: signing in…");
             await EnsureSignedIn();
             EnsureNetworkManager();
+            await TeardownPrevious();
 
             Status = "Joining…";
             Debug.Log($"[MUTAGEN][net] Join: joining by code {code}…");

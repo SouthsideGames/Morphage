@@ -41,7 +41,8 @@ namespace Mutagen
             else if (elite == "frenzied") { speed *= 1.45f; dmg *= 1.35f; xp *= 2; }
             hp = maxHp;
             dead = false; hitFlash = 0f; fireCd = Rng.Rand(1.2f, 2.4f);
-            poison = 0f; poisonT = 0f; poisonFloat = 0f; contactCd = 0f; t = Fx.Rand(0f, TAU); scale = 0f;
+            poison = 0f; poisonT = 0f; poisonFloat = 0f; contactCd = 0f; scale = 0f;
+            t = Rng.Rand(0f, TAU); // seeded: t feeds the boss spread-attack angle (gameplay), not just the idle pulse
             slowT = 0f; slowMul = 1f;
             attackCd = Rng.Rand(2.2f, 3.2f); windup = 0f; attackType = null; aimX = 0f; aimY = 1f;
             bossDashing = false; dashTime = 0f; bdvx = 0f; bdvy = 0f; finalBoss = false;
@@ -106,7 +107,7 @@ namespace Mutagen
             int drops = cfg.boss ? 18 : (id == "tank" ? 3 : 1);
             if (elite != null) drops += 2;
             for (int i = 0; i < drops; i++)
-                game.AddOrb(x + Fx.Rand(-12f, 12f), y + Fx.Rand(-12f, 12f),
+                game.AddOrb(x + Rng.Rand(-12f, 12f), y + Rng.Rand(-12f, 12f), // seeded: orb positions decide who collects the XP
                     cfg.boss ? 6f : Mathf.Ceil((float)xp / (drops > 1 ? 2f : 1f)));
             if (cfg.explode) game.Explode(x, y, 70f, dmg * 2.2f, color);
             if (cfg.boss) game.OnBossKilled(this);
