@@ -127,7 +127,7 @@ namespace Mutagen
                 for (int i = 0; i < 10; i++)
                 {
                     float a = i / 10f * TAU + t;
-                    game.AddProjectile(x, y, Mathf.Cos(a) * 230f, Mathf.Sin(a) * 230f, false, dmg * 0.5f, Palette.BossShot, 7f, 4f);
+                    game.AddProjectile(x, y, SimMath.Cos(a) * 230f, SimMath.Sin(a) * 230f, false, dmg * 0.5f, Palette.BossShot, 7f, 4f);
                 }
                 game.Shake(6f);
             }

@@ -1,7 +1,10 @@
 # Morphage — Multiplayer Readiness & Plan
 
-> Status: **online co-op IN PROGRESS — basic play working over the internet.** Two players
-> connect by share code, each drives their own hero (move + attack), enemies/waves shared.
+> Status: **online co-op WORKING CROSS-PLATFORM — verified iPhone ↔ Android (2026-07-02).** Two
+> players connect by share code, each drives their own hero, full lockstep sync holds through
+> combat + level-ups with no desync — including MIXED-PLATFORM matches (the SimMath deterministic
+> math layer held with zero desyncs on first real test). Competitive last-one-standing rules.
+> The core netcode is DONE; remaining work is polish and release logistics.
 >
 > Target design: **online co-op, 2 players, independent builds** (each player has
 > their own HP, XP, level, move loadout, and mutation draft; enemies and waves are shared).
@@ -37,9 +40,41 @@
 - **Disconnect handling ✅ (v1)** — peer drop (NGO disconnect callback or ~10s lockstep stall) ends the run as
   "Opponent Left" — the remaining player WINS (rage-quit = loss). Fresh host/join tears down the previous
   session (`TeardownPrevious`: leave session, NGO shutdown, re-register per-session message handlers).
-- **Still TODO:** resync fallback (auto-recover from desync — only worth building if desyncs persist after the
-  arena fix); rematch UX; verify on real devices post-arena-fix; polish (compact card panel, reroll, replace,
-  W/L on menu; iPad letterboxes the host-shaped arena in co-op — cosmetic).
+- **Real-device verification ✅ (2026-07-02, iPhone + iPad):** no desync through live play after two final
+  device-only fixes: (1) **arena size** propagated from host (each device screen-fits `w×h` at startup —
+  the two devices literally simulated different arenas); (2) **touch move-bar taps** were calling
+  `player.UseMove/Dash` directly, bypassing the input packets — now routed through `Game.QueueMove/QueueDash`
+  (the queue is what rides the network). LESSON: every gameplay input MUST enter the sim via the tick-input
+  queue; any direct sim call from UI is a device-only desync.
+- **Cross-platform (iOS↔Android) determinism — SimMath layer ✅ VERIFIED (iPhone↔Android match, no desync).** Android release
+  planned → mixed matches must survive different compiled binaries. Platform libm transcendentals (sin/cos/
+  atan2/pow) differ in the last bits between Apple and Android toolchains → lockstep drift. Added
+  `Core/SimMath.cs` (polynomial Sin/Cos/Atan2 + PowInt, plain IEEE arithmetic, one op per statement to block
+  divergent multiply-add fusion) and swapped all 17 gameplay call sites (Player attack angles/projectiles,
+  Enemy boss spread, Clone orbit, CdMul/dash Pow). Cosmetic Mathf uses left alone; Mathf.Sqrt/Floor/etc. are
+  exact IEEE ops and stay. NOTE: solo determinism baseline hash CHANGES (one time). Residual cross-platform
+  risk: compiler-level fusion on general sim arithmetic — verify with the desync detector on a real
+  iPhone↔Android match; if it still drifts, next step is the resync fallback (or fixed-point).
+- **Quick Match (random opponents) ✅ (untested).** `CoopNet.QuickMatchAsync` uses the Sessions quick-join:
+  search public sessions ~6s → join one (adopting host's seed/settings/arena) or create one and wait. Friend
+  games (`HostAsync`) are now `IsPrivate` — joinable by code only, invisible to quick-matchers. Sessions carry
+  a `ver` property (`CoopNet.GameVer` — **bump on every sim-affecting release**); joiners refuse mismatched
+  versions (guaranteed desync otherwise). Known edge: two players pressing Quick Match in the same ~6s window
+  can both become waiting hosts (quick-join race) — self-resolves for later joiners; revisit if it bites.
+- **Edge-case hardening pass ✅ (Tier 1).** Fixed: solo runs after an abandoned host/join/search (stale
+  `coop`/`localIndex` cleared in `StartRun` + `CloseCoop`); quit-the-app win farming (disconnects classify
+  own-link vs partner-left — only a verified partner departure in a truly started match, `_execTick ≥ 120`, awards
+  a win; everything else ends "Connection Lost / NO RESULT"); zombie-lobby free wins (same started-gate);
+  rematch honored only while still in-session and idle; Quick Match version FILTER (indexed `ver` property +
+  `FilterOption` — mismatched builds never even match); join codes uppercased; slowmo locked in co-op.
+  Tier 2/3 pass ✅: rematch button live-grays to "Opponent Left"; draft pick/reroll lock until the networked
+  choice lands (double-tap guard); re-host notes the old code is cancelled; abyss backdrop behind the arena
+  (letterbox polish); rotation/resize re-frames the camera; host wifi-drop detected via internetReachability
+  (no free win). DEFERRED by design: adaptive input delay (tune from real-network telemetry; fixed 4 works)
+  and the quick-match simultaneous-press race (self-heals; proper fix = Matchmaker service at real volume).
+- **Still TODO (all non-blocking polish):** resync fallback (auto-recover — deprioritized: no desyncs observed
+  on device); rematch UX without app restart; compact non-blocking card panel; co-op reroll; loadout-full
+  replace flow; W/L record on menu; iPad letterboxes the host-shaped arena (cosmetic).
 
 ---
 

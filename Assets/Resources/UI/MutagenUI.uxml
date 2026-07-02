@@ -27,7 +27,6 @@
                 </ui:VisualElement>
             </ui:VisualElement>
             <ui:VisualElement name="muts" class="muts"/>
-            <ui:Label class="hint" text="WASD move · 1-4 moves · SHIFT dash · R reroll · TAB debug"/>
             <ui:Button name="pauseBtn" class="pausebtn" text="❚❚"/>
             <ui:Label name="banner" class="banner"/>
             <ui:VisualElement name="touchLayer" class="touchlayer"/>
@@ -109,7 +108,6 @@
         <ui:VisualElement name="codexOverlay" class="overlay">
             <ui:Label class="eyebrow" text="Field Guide"/>
             <ui:Label class="big" text="Synergies"/>
-            <ui:Label class="sub" text="Combine these mutations to trigger powerful synergies. Any active in your current run are highlighted."/>
             <ui:VisualElement name="codexList" class="codexlist"/>
             <ui:Button name="codexDone" text="Done" class="btn"/>
         </ui:VisualElement>
@@ -155,25 +153,16 @@
                 <ui:VisualElement class="togglerow">
                     <ui:Button name="modeToggle" text="Campaign · 15 waves" class="toggle"/>
                 </ui:VisualElement>
-                <ui:VisualElement class="btnrow">
-                    <ui:Button name="gameModeDone" text="Done" class="btn"/>
-                </ui:VisualElement>
-            </ui:VisualElement>
-        </ui:VisualElement>
-
-        <!-- ===== Co-op (online) ===== -->
-        <ui:VisualElement name="coopOverlay" class="overlay">
-            <ui:Label class="eyebrow" text="Play Together"/>
-            <ui:Label class="big" text="Co-op"/>
-            <ui:VisualElement class="settingsbox">
-                <ui:Label class="sub" text="Host a game to get a share code, or paste a friend's code to join."/>
-                <ui:Button name="hostBtn" text="Host Game" class="btn"/>
+                <ui:Label class="slabel" text="Online co-op"/>
+                <ui:Button name="quickBtn" text="Quick Match ▸" class="btn"/>
+                <ui:Button name="hostBtn" text="Host Game" class="btn ghost"/>
                 <ui:Label class="slabel" text="Join code"/>
                 <ui:TextField name="coopCodeField" class="seedinput"/>
                 <ui:Button name="joinBtn" text="Join Game" class="btn ghost"/>
                 <ui:Label name="netStatus" class="sub"/>
+                <ui:Label name="coopRecord" class="slabel"/>
                 <ui:VisualElement class="btnrow">
-                    <ui:Button name="coopDone" text="Done" class="btn ghost"/>
+                    <ui:Button name="gameModeDone" text="Done" class="btn"/>
                 </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
@@ -182,11 +171,9 @@
         <ui:VisualElement name="startOverlay" class="overlay">
             <ui:Label name="menuTitle" class="big menutitle" text="MORPHAGE"/>
             <ui:VisualElement class="menucard">
-                <ui:Label class="sub" text="Survive the waves, absorb DNA, draft mutations, become monstrous."/>
                 <ui:Button name="beginBtn" text="Begin Run ▸" class="btn"/>
                 <ui:VisualElement class="togglerow">
                     <ui:Button name="gameModeBtn" text="Game Mode" class="toggle"/>
-                    <ui:Button name="coopMenuBtn" text="Co-op" class="toggle"/>
                     <ui:Button name="settingsBtn" text="Settings" class="toggle"/>
                     <ui:Button name="codexBtn" text="Synergies" class="toggle"/>
                     <ui:Button name="galleryBtn" text="Monsters" class="toggle"/>

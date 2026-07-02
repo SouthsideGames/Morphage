@@ -17,7 +17,7 @@ namespace Mutagen
 
         VisualElement _hud, _debug, _startOverlay, _levelOverlay, _deathOverlay;
         VisualElement _codexOverlay, _codexList;
-        VisualElement _galleryOverlay, _galleryList, _gameModeOverlay, _coopOverlay;
+        VisualElement _galleryOverlay, _galleryList, _gameModeOverlay;
         Label _galleryEmpty;
         readonly System.Collections.Generic.List<RenderTexture> _portraits = new();
         Button _hapticsToggle, _shakeToggle, _clearDataBtn, _perfToggle, _handToggle;
@@ -25,7 +25,7 @@ namespace Mutagen
         VisualElement _hpFill, _xpFill, _muts, _cards;
         Label _hpTxt, _xpTxt, _lvlVal, _waveVal, _dnaVal, _partnerHp, _desyncInfo;
         // Co-op menu controls (bound from the coop overlay in UXML)
-        Button _hostBtn, _joinBtn; TextField _codeField; Label _netStatus;
+        Button _hostBtn, _joinBtn, _quickBtn; TextField _codeField; Label _netStatus;
         Label _dWave, _dLvl, _dKills, _dTime, _dDps, _dTaken, _dMuts, _dSeed, _dbgInfo, _dbgTitle;
         Label _banner, _endEyebrow, _endBig, _replaceTitle, _replaceSub;
         VisualElement _movebar, _replaceOverlay, _replaceSlots, _settingsOverlay, _bindList, _pauseOverlay;
@@ -161,7 +161,6 @@ namespace Mutagen
             _codexOverlay = Q("codexOverlay"); _codexList = Q("codexList");
             _galleryOverlay = Q("galleryOverlay"); _galleryList = Q("galleryList"); _galleryEmpty = L("galleryEmpty");
             _gameModeOverlay = Q("gameModeOverlay");
-            _coopOverlay = Q("coopOverlay");
             _volMaster = _root.Q<Slider>("volMaster"); _volMusic = _root.Q<Slider>("volMusic"); _volSfx = _root.Q<Slider>("volSfx");
             _seedField = _root.Q<TextField>("seedField");
             _soundToggle = _root.Q<Button>("soundToggle");
@@ -174,7 +173,10 @@ namespace Mutagen
 
             // ---- bindings ----
             _root.Q<Button>("beginBtn").clicked += () => _game.StartRun();
-            _root.Q<Button>("replayBtn").clicked += () => _game.ReplaySeed();
+            _root.Q<Button>("replayBtn").clicked += () =>
+            {
+                if (_game.coop && Net.CoopNet.Connected) _game.RequestRematch(); else _game.ReplaySeed();
+            };
             _root.Q<Button>("menuBtn").clicked += () => _game.GotoMenu();
             _rerollBtn.clicked += () => _game.Reroll();
             _soundToggle.clicked += () => { GameSettings.SetSound(!Sfx.Enabled); SyncSound(); };
@@ -227,11 +229,9 @@ namespace Mutagen
             var gameModeBtn = _root.Q<Button>("gameModeBtn");
             if (gameModeBtn != null) gameModeBtn.clicked += ShowGameMode;
             var gameModeDone = _root.Q<Button>("gameModeDone");
-            if (gameModeDone != null) gameModeDone.clicked += HideGameMode;
-            var coopMenuBtn = _root.Q<Button>("coopMenuBtn");
-            if (coopMenuBtn != null) coopMenuBtn.clicked += ShowCoop;
-            var coopDone = _root.Q<Button>("coopDone");
-            if (coopDone != null) coopDone.clicked += HideCoop;
+            if (gameModeDone != null) gameModeDone.clicked += CloseCoop; // also abandons a pending co-op search
+            _quickBtn = _root.Q<Button>("quickBtn");
+            if (_quickBtn != null) _quickBtn.clicked += OnQuickClicked;
             _hostBtn = _root.Q<Button>("hostBtn");
             if (_hostBtn != null) _hostBtn.clicked += OnHostClicked;
             _joinBtn = _root.Q<Button>("joinBtn");
@@ -255,7 +255,6 @@ namespace Mutagen
             Hide(_codexOverlay);
             Hide(_galleryOverlay);
             Hide(_gameModeOverlay);
-            Hide(_coopOverlay);
             Hide(_pauseOverlay);
             if (_pauseBtn != null) _pauseBtn.style.display = DisplayStyle.None;
             if (_banner != null) _banner.style.display = DisplayStyle.None;
@@ -279,7 +278,7 @@ namespace Mutagen
             if (dbgCoop != null) dbgCoop.clicked += _game.DebugCoop;
 
             // Make every full-screen panel scroll when its content is taller than the safe area.
-            foreach (var ov in new[] { _startOverlay, _settingsOverlay, _codexOverlay, _galleryOverlay, _gameModeOverlay, _coopOverlay, _levelOverlay, _deathOverlay, _replaceOverlay, _pauseOverlay })
+            foreach (var ov in new[] { _startOverlay, _settingsOverlay, _codexOverlay, _galleryOverlay, _gameModeOverlay, _levelOverlay, _deathOverlay, _replaceOverlay, _pauseOverlay })
                 WrapInScroll(ov);
 
             Hide(_levelOverlay); Hide(_deathOverlay); Hide(_debug);
@@ -311,32 +310,68 @@ namespace Mutagen
             _root.Add(_partnerHp);
         }
 
+        // Done on the game-mode panel: if a co-op search/host is pending (not yet a live match),
+        // abandon it so we don't linger in matchmaking invisibly.
+        void CloseCoop()
+        {
+            if (!Net.CoopNet.Connected)
+            {
+                Net.CoopNet.Leave();
+                _game.coop = false; // abandoning a pending search/host — back to solo identity
+            }
+            if (_netStatus != null) _netStatus.text = "";
+            HideGameMode();
+        }
+
+        async void OnQuickClicked()
+        {
+            try
+            {
+                SetNetButtons(false);
+                if (_netStatus != null) _netStatus.text = "Finding an opponent…";
+                await Net.CoopNet.QuickMatchAsync(_game);
+                if (_netStatus != null) _netStatus.text = Net.CoopNet.Status;
+            }
+            catch (System.Exception e)
+            {
+                if (_netStatus != null) _netStatus.text = "Match failed: " + e.Message;
+                Debug.LogError("[MUTAGEN][net] Quick match failed: " + e);
+            }
+            finally { SetNetButtons(true); }
+        }
+
+        void SetNetButtons(bool on)
+        {
+            _quickBtn?.SetEnabled(on); _hostBtn?.SetEnabled(on); _joinBtn?.SetEnabled(on);
+        }
+
         async void OnHostClicked()
         {
             try
             {
-                _hostBtn?.SetEnabled(false); _joinBtn?.SetEnabled(false);
+                bool replacing = Net.CoopNet.Session != null && !Net.CoopNet.Connected; // was already hosting/waiting
+                SetNetButtons(false);
                 if (_netStatus != null) _netStatus.text = "Hosting…";
                 string seed = UnityEngine.Random.Range(1, int.MaxValue).ToString();
                 string code = await Net.CoopNet.HostAsync(_game, seed);
                 if (_codeField != null) _codeField.value = code;
-                if (_netStatus != null) _netStatus.text = "Share this code ↑";
+                if (_netStatus != null) _netStatus.text = replacing ? "New code — the previous one is cancelled" : "Share this code ↑";
             }
             catch (System.Exception e)
             {
                 if (_netStatus != null) _netStatus.text = "Host failed: " + e.Message;
                 Debug.LogError("[MUTAGEN][net] Host failed: " + e);
             }
-            finally { _hostBtn?.SetEnabled(true); _joinBtn?.SetEnabled(true); }
+            finally { SetNetButtons(true); }
         }
 
         async void OnJoinClicked()
         {
             try
             {
-                string code = (_codeField?.value ?? "").Trim();
+                string code = (_codeField?.value ?? "").Trim().ToUpperInvariant(); // codes are uppercase — accept sloppy typing
                 if (string.IsNullOrEmpty(code)) { if (_netStatus != null) _netStatus.text = "Type the host's code first"; return; }
-                _hostBtn?.SetEnabled(false); _joinBtn?.SetEnabled(false);
+                SetNetButtons(false);
                 if (_netStatus != null) _netStatus.text = "Joining…";
                 await Net.CoopNet.JoinAsync(_game, code);
                 if (_netStatus != null) _netStatus.text = "Joined! seed " + _game.seedText;
@@ -346,7 +381,7 @@ namespace Mutagen
                 if (_netStatus != null) _netStatus.text = "Join failed: " + e.Message;
                 Debug.LogError("[MUTAGEN][net] Join failed: " + e);
             }
-            finally { _hostBtn?.SetEnabled(true); _joinBtn?.SetEnabled(true); }
+            finally { SetNetButtons(true); }
         }
 
         // Reparent an overlay's children into a vertical ScrollView so tall content (e.g. the
@@ -480,8 +515,53 @@ namespace Mutagen
         }
 
         // ---------------------------------------------------------------- draft
+        // Compact co-op draft: the fight keeps running, so the panel must not cover or block the screen.
+        // Shrinks the cards, drops the dim/titles, and lets touches pass through everywhere but the cards.
+        void ApplyDraftCompact(bool on)
+        {
+            if (_levelOverlay == null) return;
+            var sv = _levelOverlay.Q<ScrollView>(className: "oscroll");
+            var eyebrow = _levelOverlay.Q<Label>(className: "eyebrow");
+            var big = _levelOverlay.Q<Label>(className: "big");
+            _levelOverlay.pickingMode = on ? PickingMode.Ignore : PickingMode.Position;
+            if (sv != null)
+            {
+                sv.pickingMode = on ? PickingMode.Ignore : PickingMode.Position;
+                sv.contentViewport.pickingMode = on ? PickingMode.Ignore : PickingMode.Position;
+                sv.contentContainer.pickingMode = on ? PickingMode.Ignore : PickingMode.Position;
+            }
+            if (on)
+            {
+                _levelOverlay.style.backgroundColor = new Color(0f, 0f, 0f, 0f); // no full-screen dim
+                _levelOverlay.style.justifyContent = Justify.FlexStart;           // pin to the top of the screen
+                if (sv != null) sv.style.marginTop = 74f;                          // clear the HP/XP topbar
+                if (eyebrow != null) eyebrow.style.display = DisplayStyle.None;
+                if (big != null) big.style.display = DisplayStyle.None;
+                if (_cards != null) _cards.style.scale = new Scale(new Vector2(0.72f, 0.72f));
+            }
+            else // restore the stylesheet's full-screen draft look for solo
+            {
+                _levelOverlay.style.backgroundColor = StyleKeyword.Null;
+                _levelOverlay.style.justifyContent = StyleKeyword.Null;
+                if (sv != null) sv.style.marginTop = StyleKeyword.Null;
+                if (eyebrow != null) eyebrow.style.display = StyleKeyword.Null;
+                if (big != null) big.style.display = StyleKeyword.Null;
+                if (_cards != null) _cards.style.scale = StyleKeyword.Null;
+            }
+        }
+
+        // Lock the cards + reroll after a co-op pick is queued — it applies a few ticks later over the
+        // network, and a second tap in that window would act on the NEXT card set unintentionally.
+        public void SetDraftLocked(bool locked)
+        {
+            _cards?.SetEnabled(!locked);
+            _rerollBtn?.SetEnabled(!locked);
+        }
+
         public void ShowDraft(System.Collections.Generic.List<MutationDef> options, Action<MutationDef> onPick)
         {
+            ApplyDraftCompact(_game.coop);
+            SetDraftLocked(false); // fresh cards are always interactable
             _cards.Clear();
             for (int i = 0; i < options.Count; i++)
             {
@@ -544,11 +624,10 @@ namespace Mutagen
                 _cards.Add(card);
             }
             UpdateReroll();
-            if (_rerollBtn != null) _rerollBtn.style.display = _game.coop ? DisplayStyle.None : DisplayStyle.Flex; // no reroll in co-op yet
             Show(_levelOverlay);
         }
 
-        public void HideDraft() => Hide(_levelOverlay);
+        public void HideDraft() { Hide(_levelOverlay); SetDraftLocked(false); }
 
         public void UpdateReroll()
         {
@@ -581,13 +660,14 @@ namespace Mutagen
                 names += d.displayName + (kv.Value > 1 ? $" ×{kv.Value}" : "") + (p.evolved.Contains(kv.Key) ? "★" : "");
             }
             _dMuts.text = names.Length > 0 ? "Final form: " + names : "A sad, unmutated blob.";
-            var replaySolo = _root.Q<Button>("replayBtn"); if (replaySolo != null) replaySolo.style.display = DisplayStyle.Flex;
+            var replaySolo = _root.Q<Button>("replayBtn");
+            if (replaySolo != null) { replaySolo.style.display = DisplayStyle.Flex; replaySolo.text = "Replay Seed ▸"; }
             Show(_deathOverlay);
         }
 
         // Competitive co-op result: Winner / Defeated / Draw, with the local hero's stats, the partner's
         // outcome, and this device's running record.
-        public void ShowCoopEnd(bool won, bool draw, string eyebrow = null)
+        public void ShowCoopEnd(bool won, bool draw, string eyebrow = null, string big = null)
         {
             var g = _game; var p = g.player; var s = g.stats;
             _dWave.text = g.wave.ToString();
@@ -598,16 +678,36 @@ namespace Mutagen
             _dTaken.text = Mathf.Round(s.damageTaken).ToString();
             _dSeed.text = $"Co-op record: {SaveSystem.CoopWins}W · {SaveSystem.CoopLosses}L";
             if (_endEyebrow != null) _endEyebrow.text = eyebrow ?? (draw ? "Both Fell" : won ? "Last One Standing" : "Outlasted");
-            if (_endBig != null) { _endBig.text = draw ? "DRAW" : won ? "WINNER" : "DEFEATED"; _endBig.style.color = won ? Palette.Dna : Palette.Ink; }
+            if (_endBig != null) { _endBig.text = big ?? (draw ? "DRAW" : won ? "WINNER" : "DEFEATED"); _endBig.style.color = won ? Palette.Dna : Palette.Ink; }
             var partner = g.Partner();
             _dMuts.text = partner != null
                 ? $"Partner — Lv {partner.level} · {(draw ? "fell together" : won ? "fell first" : "survived")}"
                 : "";
-            var replayC = _root.Q<Button>("replayBtn"); if (replayC != null) replayC.style.display = DisplayStyle.None; // no solo-replay from a co-op result
+            // Host gets a Rematch button (it generates the new seed and pulls the partner in);
+            // the joiner just waits — their game restarts automatically when the host rematches.
+            var replayC = _root.Q<Button>("replayBtn");
+            if (replayC != null)
+            {
+                bool canRematch = Net.CoopNet.IsHost && Net.CoopNet.Connected;
+                replayC.style.display = canRematch ? DisplayStyle.Flex : DisplayStyle.None;
+                replayC.text = "Rematch ▸";
+            }
             Show(_deathOverlay);
         }
 
         public void HideEnd() => Hide(_deathOverlay);
+
+        // Live check while the co-op result screen is up: if the partner has since left the session,
+        // gray out the Rematch button instead of letting it silently do nothing.
+        public void UpdateCoopEnd()
+        {
+            if (!_game.coop || _deathOverlay == null || _deathOverlay.style.display == DisplayStyle.None) return;
+            var b = _root.Q<Button>("replayBtn");
+            if (b == null || b.style.display == DisplayStyle.None) return;
+            bool ok = Net.CoopNet.Connected;
+            b.SetEnabled(ok);
+            if (!ok) b.text = "Opponent Left";
+        }
 
         public void UpdateBanner()
         {
@@ -616,7 +716,7 @@ namespace Mutagen
             {
                 var b = _game.banner.Value;
                 _banner.style.display = DisplayStyle.Flex;
-                _banner.text = string.IsNullOrEmpty(b.sub) ? b.text : b.text + "\n" + b.sub;
+                _banner.text = b.text; // sub-lines removed by request — headline only
                 float a = Mathf.Clamp01(Mathf.Min(b.life, b.max - b.life) / 0.35f);
                 var c = b.color; c.a = a; _banner.style.color = c;
             }
@@ -882,12 +982,13 @@ namespace Mutagen
         public void HideSettings() { Binds.Rebinding = null; Hide(_settingsOverlay); }
 
         // ---------------------------------------------------------------- game mode (seed + campaign/endless)
-        public void ShowGameMode() { Show(_gameModeOverlay); _gameModeOverlay?.BringToFront(); }
+        public void ShowGameMode()
+        {
+            var rec = _root?.Q<Label>("coopRecord"); // co-op section lives in this panel now
+            if (rec != null) rec.text = $"Record   {SaveSystem.CoopWins}W · {SaveSystem.CoopLosses}L";
+            Show(_gameModeOverlay); _gameModeOverlay?.BringToFront();
+        }
         public void HideGameMode() { Hide(_gameModeOverlay); }
-
-        // ---------------------------------------------------------------- co-op (online)
-        public void ShowCoop() { Show(_coopOverlay); _coopOverlay?.BringToFront(); }
-        public void HideCoop() { Hide(_coopOverlay); }
 
         static void SyncToggle(Button b, bool on, string label)
         {
@@ -1032,7 +1133,7 @@ namespace Mutagen
         public void HideDesyncInfo() => Hide(_desyncInfo);
 
         public void ShowStart() => Show(_startOverlay);
-        public void HideStart() { Hide(_startOverlay); Hide(_coopOverlay); }
+        public void HideStart() { Hide(_startOverlay); Hide(_gameModeOverlay); } // a match may auto-start from the game-mode panel
 
         // ---------------------------------------------------------------- debug / misc
         public void SetDebugVisible(bool v) { if (v) Show(_debug); else Hide(_debug); }

@@ -23,7 +23,7 @@ namespace Mutagen
             if (life >= 0f) { life -= dt; if (life <= 0f) { dead = true; return; } }
             angle += dt * 1.4f;
             const float orbit = 46f;
-            float tx = player.x + Mathf.Cos(angle) * orbit, ty = player.y + Mathf.Sin(angle) * orbit;
+            float tx = player.x + SimMath.Cos(angle) * orbit, ty = player.y + SimMath.Sin(angle) * orbit; // deterministic: clone position is sim state
             x = Rng.Lerp(x, tx, Rng.Clamp(dt * 6f, 0f, 1f));
             y = Rng.Lerp(y, ty, Rng.Clamp(dt * 6f, 0f, 1f));
             atkCd -= dt;

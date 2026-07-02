@@ -186,16 +186,33 @@ namespace Mutagen
             _cam.backgroundColor = Palette.Abyss;
         }
 
-        SpriteRenderer _floorSr;
+        SpriteRenderer _floorSr, _backdropSr;
 
         void SetupFloor()
         {
+            // Deep-abyss backdrop behind the arena — visible when the arena doesn't fill this screen
+            // (co-op letterboxing on a different-shaped device, or mid-game rotation).
+            var bg = new GameObject("FloorBackdrop");
+            bg.transform.SetParent(_viewRoot, false);
+            _backdropSr = bg.AddComponent<SpriteRenderer>();
+            _backdropSr.sprite = SpriteFactory.Box;
+            _backdropSr.color = new Color(Palette.Abyss.r * 0.55f, Palette.Abyss.g * 0.55f, Palette.Abyss.b * 0.55f);
+            _backdropSr.sortingOrder = -101;
+
             var go = new GameObject("Floor");
             go.transform.SetParent(_viewRoot, false);
             _floorSr = go.AddComponent<SpriteRenderer>();
             _floorSr.sprite = SpriteFactory.MakeFloor((int)w, (int)h);
             _floorSr.sortingOrder = -100;
             go.transform.position = new Vector3(w / 2f, h / 2f, 1f);
+            PositionBackdrop();
+        }
+
+        void PositionBackdrop()
+        {
+            if (_backdropSr == null) return;
+            _backdropSr.transform.position = new Vector3(w / 2f, h / 2f, 2f);
+            _backdropSr.transform.localScale = new Vector3(w * 4f, h * 4f, 1f);
         }
 
         // Co-op: both peers must simulate the IDENTICAL arena. Each device fits the arena to its own
@@ -211,12 +228,22 @@ namespace Mutagen
                 _floorSr.sprite = SpriteFactory.MakeFloor((int)w, (int)h);
                 _floorSr.transform.position = new Vector3(w / 2f, h / 2f, 1f);
             }
+            PositionBackdrop();
             Debug.Log($"[MUTAGEN][net] arena set to {w:0}×{h:0} (host's dimensions)");
         }
+
+        int _lastScreenW, _lastScreenH;
 
         // ---------------------------------------------------------------- loop
         void Update()
         {
+            // Rotation / window resize: re-frame the camera to the (unchanged) arena. Visual only.
+            if (Screen.width != _lastScreenW || Screen.height != _lastScreenH)
+            {
+                _lastScreenW = Screen.width; _lastScreenH = Screen.height;
+                if (_cam != null) SetupCamera();
+            }
+
             bool touch = ui != null && TouchInput.IsTouchDevice && state == GameState.Playing && !_paused;
             TouchInput.Active = touch;
             if (ui != null) { ui.SetTouchActive(touch); ui.SetPauseVisible(state == GameState.Playing && !coop); }
@@ -264,6 +291,7 @@ namespace Mutagen
                 ui.UpdateBanner();
                 ui.UpdateMoveBar();
                 ui.UpdateDebug();
+                ui.UpdateCoopEnd();
             }
         }
 
@@ -311,7 +339,7 @@ namespace Mutagen
                     ResendRecent();
                     if (++_stallFrames == 90)
                         Debug.LogWarning($"[MUTAGEN][net] stalled at tick {_execTick} (~1.5s) — waiting for partner (lag/packet loss)");
-                    if (_stallFrames >= 600) OnPartnerLeft(); // ~10s of silence: treat as a dead connection, don't freeze forever
+                    if (_stallFrames >= 600) OnPartnerLeft(true); // ~10s of silence: dead connection — can't assign blame, so no result
                 }
                 else _stallFrames = 0;
                 if (_accum > FIXED * 30f) _accum = FIXED * 30f; // cap catch-up backlog
@@ -606,14 +634,27 @@ namespace Mutagen
             ui.ShowDraft(p.draftOptions, def => SetLocalDraftPick(p.draftOptions.IndexOf(def)));
 
         // The local hero clicked a co-op upgrade card; queue the choice into the next input packet so it
-        // applies on the same tick on both peers.
-        public void SetLocalDraftPick(int idx) { if (idx >= 0) _pendingDraftByte = (byte)(idx + 1); }
+        // applies on the same tick on both peers. Cards lock until the pick lands (double-tap guard).
+        public void SetLocalDraftPick(int idx)
+        {
+            if (idx < 0) return;
+            _pendingDraftByte = (byte)(idx + 1);
+            ui.SetDraftLocked(true);
+        }
 
         // Apply a co-op upgrade pick to hero p — driven by the TickInput.draft byte, so it runs identically
         // on both peers at the same tick.
         void ApplyCoopDraft(Player p, byte draft)
         {
             if (p.draftOptions == null || p.pendingDrafts <= 0) return;
+            if (draft == Net.TickInput.DraftReroll) // shared reroll pool, spent deterministically on both peers
+            {
+                if (rerolls <= 0) return;
+                rerolls--;
+                p.draftOptions = mutations.Draft(p, 3);
+                if (p.index == localIndex) { ShowLocalCoopDraft(p); ui.UpdateReroll(); }
+                return;
+            }
             int idx = draft - 1;
             if (idx < 0 || idx >= p.draftOptions.Count) return;
             ApplyMutation(p, p.draftOptions[idx]);
@@ -684,6 +725,16 @@ namespace Mutagen
 
         public void Reroll()
         {
+            if (coop && Net.CoopNet.Connected)
+            {
+                // Rides the input packet (like a card pick) so both sims reroll on the same tick.
+                if (rerolls > 0 && player != null && player.pendingDrafts > 0)
+                {
+                    _pendingDraftByte = Net.TickInput.DraftReroll;
+                    ui.SetDraftLocked(true); // locked until the rerolled cards arrive
+                }
+                return;
+            }
             if (rerolls <= 0 || state != GameState.LevelUp) return;
             rerolls--;
             draftOptions = mutations.Draft(player, 3);
@@ -937,6 +988,9 @@ namespace Mutagen
 
         public void StartRun(string seed = null)
         {
+            // Solo entry point — clear any leftover co-op identity from an abandoned host/join/search.
+            // (Stale localIndex=1 would leave the run heroless; stale coop=true would spawn a ghost bot.)
+            coop = false; localIndex = 0;
             if (seed == null)
             {
                 string v = ui.GetSeedField().Trim();
@@ -954,6 +1008,15 @@ namespace Mutagen
         }
 
         public void ReplaySeed() => StartRun(seedText);
+
+        // Host starts a fresh co-op match on a new seed; the partner is pulled in over the rematch channel.
+        public void RequestRematch()
+        {
+            if (!coop || !Net.CoopNet.IsHost || !Net.CoopNet.Connected) return;
+            seedText = ((uint)UnityEngine.Random.Range(1, int.MaxValue)).ToString();
+            Net.CoopSync.SendRematch(seedText);
+            StartCoopRun();
+        }
 
         // Both networked peers call this once connected: same seed → identical run. localIndex is
         // already set (host 0 / client 1); the non-local hero is driven by remote input in Step().
@@ -1022,19 +1085,35 @@ namespace Mutagen
             p1hp = players[1]?.hp ?? -1f, p1xp = players[1]?.xp ?? -1f, p1lvl = players[1]?.level ?? -1,
         };
 
-        // The other player dropped (connection lost or ~10s of lockstep silence): competitive rules say
-        // the one who stays wins. Ends the run cleanly instead of freezing at the stalled tick.
-        public void OnPartnerLeft()
+        // The connection ended mid-run. A WIN is only awarded when the PARTNER verifiably left AND the
+        // match truly got going. If OUR own link died (backgrounded app, dropped wifi) or the "match"
+        // never started (zombie lobby), it ends as Connection Lost with no result — so quitting the app
+        // can never farm wins, and dead lobbies can't hand out free ones.
+        public void OnPartnerLeft(bool ownLinkDied)
         {
             if (!coop || state != GameState.Playing) return;
-            Debug.LogWarning("[MUTAGEN][net] partner left — ending co-op run");
+            bool started = _execTick >= 120; // ~2s of real ticks — filters matches that never began
             state = GameState.Dead; Sfx.Over();
-            CaptureMonster(true);
-            SaveSystem.AddCoopResult(true);
             ui.HideDraft();
-            ui.ShowCoopEnd(true, false, "Opponent Left");
+            if (!ownLinkDied && started)
+            {
+                Debug.LogWarning("[MUTAGEN][net] partner left mid-match — win awarded");
+                CaptureMonster(true);
+                SaveSystem.AddCoopResult(true);
+                ui.ShowCoopEnd(true, false, "Opponent Left");
+            }
+            else
+            {
+                Debug.LogWarning($"[MUTAGEN][net] connection ended (ownLink {ownLinkDied}, started {started}) — no result");
+                ui.ShowCoopEnd(false, true, "Connection Lost", "NO RESULT");
+            }
         }
-        public void GotoMenu() { ReleaseAll(); state = GameState.Menu; _paused = false; ui.HideEnd(); ui.HideDraft(); ui.HideReplace(); ui.HidePause(); ui.ShowStart(); }
+        public void GotoMenu()
+        {
+            if (coop) { coop = false; Net.CoopNet.Leave(); } // bailing to menu drops the online session
+            ReleaseAll(); state = GameState.Menu; _paused = false;
+            ui.HideEnd(); ui.HideDraft(); ui.HideReplace(); ui.HidePause(); ui.HideDesyncInfo(); ui.ShowStart();
+        }
 
         // Touch/UI input entry points. MUST queue (not call UseMove/Dash directly): in co-op the queue
         // is what rides the network packet, so a direct call would fire on this sim only → desync.
@@ -1258,7 +1337,7 @@ namespace Mutagen
         public void DebugGod() { if (DebugLockedInCoop()) return; god = !god; ui.RefreshGodBtn(); }
         public void DebugLevel() { if (DebugLockedInCoop()) return; if (player != null) player.AddXp(player.xpNext - player.xp + 1f, this); }
         public void DebugDna() { if (DebugLockedInCoop()) return; if (player != null) player.AddXp(200f, this); }
-        public void DebugSlow() { slowmo = !slowmo; }
+        public void DebugSlow() { if (DebugLockedInCoop()) return; slowmo = !slowmo; } // sync-safe but would stutter the partner
         // Toggle co-op mode from the debug panel. Takes effect on the NEXT run (Reset spawns hero 2).
         public void DebugCoop() { if (DebugLockedInCoop()) return; coop = !coop; ui.RefreshCoopBtn(); }
         public void DebugTouch() { TouchInput.ForceTouch = !TouchInput.ForceTouch; }

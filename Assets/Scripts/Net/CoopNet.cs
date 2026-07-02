@@ -39,6 +39,8 @@ namespace Mutagen.Net
         const string SeedKey = "seed";
         const string AutocastKey = "autocast"; // gameplay-affecting setting — must match on both peers
         const string ArenaWKey = "aw", ArenaHKey = "ah"; // arena is screen-fit per device — joiner must adopt the host's
+        const string VerKey = "ver";
+        public const string GameVer = "1"; // bump whenever a build changes the sim — mixed versions would desync
         const int MaxPlayers = 2;
         static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
 
@@ -84,6 +86,13 @@ namespace Mutagen.Net
             go.AddComponent<CoopSync>(); // Stage 2: exchanges input packets once connected
         }
 
+        /// <summary>Leave the current co-op session (fire-and-forget) — e.g. when returning to the menu.</summary>
+        public static async void Leave()
+        {
+            try { await TeardownPrevious(); Status = ""; ReadyToStart = false; }
+            catch (System.Exception e) { Debug.LogWarning("[MUTAGEN][net] leave: " + e.Message); }
+        }
+
         /// <summary>Host a game. Returns the join code to share. Puts the game into co-op as player 0.</summary>
         public static async Task<string> HostAsync(Game game, string seed)
         {
@@ -96,18 +105,8 @@ namespace Mutagen.Net
 
             Status = "Creating game…";
             Debug.Log("[MUTAGEN][net] Host: creating session…");
-            game.autocast = game.ui != null && game.ui.GetAutocast(); // host's setting rules the match
-            var options = new SessionOptions
-            {
-                MaxPlayers = MaxPlayers,
-                SessionProperties = new Dictionary<string, SessionProperty>
-                {
-                    { SeedKey, new SessionProperty(seed, VisibilityPropertyOptions.Public) },
-                    { AutocastKey, new SessionProperty(game.autocast ? "1" : "0", VisibilityPropertyOptions.Public) },
-                    { ArenaWKey, new SessionProperty(game.w.ToString("R", Inv), VisibilityPropertyOptions.Public) },
-                    { ArenaHKey, new SessionProperty(game.h.ToString("R", Inv), VisibilityPropertyOptions.Public) }
-                }
-            }.WithRelayNetwork();
+            // Private: joinable by the share code only — invisible to Quick Match strangers.
+            var options = BuildMatchOptions(game, seed, isPrivate: true);
 
             Session = await MultiplayerService.Instance.CreateSessionAsync(options);
             IsHost = true;
@@ -137,19 +136,98 @@ namespace Mutagen.Net
             game.localIndex = 1;
             game.coop = true;
 
-            string seed = "";
-            if (Session.Properties != null && Session.Properties.TryGetValue(SeedKey, out var p)) seed = p.Value;
-            game.seedText = seed;
-            if (Session.Properties != null && Session.Properties.TryGetValue(AutocastKey, out var ac))
-                game.autocast = ac.Value == "1"; // adopt the host's gameplay settings (must match to stay in sync)
-            if (Session.Properties != null &&
-                Session.Properties.TryGetValue(ArenaWKey, out var aw) && Session.Properties.TryGetValue(ArenaHKey, out var ah) &&
+            if (!await AdoptHostProperties(game)) return; // version mismatch — refused (Status already set)
+            ReadyToStart = true; // localIndex + seed set — safe for CoopSync to auto-start now
+            Status = $"Joined · seed {game.seedText}";
+            Debug.Log($"[MUTAGEN][net] Joined session {Session.Id}.   seed = {game.seedText}");
+        }
+
+        /// <summary>Find a random opponent. Joins an open public game if one exists; otherwise hosts one
+        /// and waits. Determines host/joiner role from the resulting session.</summary>
+        public static async Task QuickMatchAsync(Game game)
+        {
+            ReadyToStart = false;
+            Status = "Signing in…";
+            Debug.Log("[MUTAGEN][net] Quick match: signing in…");
+            await EnsureSignedIn();
+            EnsureNetworkManager();
+            await TeardownPrevious();
+
+            Status = "Finding an opponent…";
+            Debug.Log("[MUTAGEN][net] Quick match: searching…");
+            // Prepare host-side config up front — used if WE end up creating the session.
+            string seed = ((uint)UnityEngine.Random.Range(1, int.MaxValue)).ToString();
+            var options = BuildMatchOptions(game, seed, isPrivate: false); // public = discoverable by other quick-matchers
+            var quick = new QuickJoinOptions
+            {
+                CreateSession = true,                        // nobody waiting? host an open game and wait
+                Timeout = System.TimeSpan.FromSeconds(6),    // how long to search before becoming the host
+                // Never match a different game version — mixed builds would instantly desync.
+                Filters = new List<FilterOption> { new FilterOption(FilterField.StringIndex1, GameVer, FilterOperation.Equal) },
+            };
+            Session = await MultiplayerService.Instance.MatchmakeSessionAsync(quick, options);
+
+            IsHost = Session.IsHost;
+            game.coop = true;
+            if (IsHost)
+            {
+                game.localIndex = 0;
+                game.seedText = seed;
+                ReadyToStart = true;
+                Status = "Waiting for an opponent…";
+                Debug.Log($"[MUTAGEN][net] Quick match: no open game found — hosting one.   seed = {seed}");
+            }
+            else
+            {
+                game.localIndex = 1;
+                if (!await AdoptHostProperties(game)) return; // version mismatch — refused
+                ReadyToStart = true;
+                Status = "Match found!";
+                Debug.Log($"[MUTAGEN][net] Quick match: joined {Session.Id}.   seed = {game.seedText}");
+            }
+        }
+
+        // Session options carrying everything the joiner must copy from the host to stay in sync.
+        static SessionOptions BuildMatchOptions(Game game, string seed, bool isPrivate)
+        {
+            game.autocast = game.ui != null && game.ui.GetAutocast(); // host's settings rule the match
+            return new SessionOptions
+            {
+                MaxPlayers = MaxPlayers,
+                IsPrivate = isPrivate,
+                SessionProperties = new Dictionary<string, SessionProperty>
+                {
+                    { SeedKey, new SessionProperty(seed, VisibilityPropertyOptions.Public) },
+                    { AutocastKey, new SessionProperty(game.autocast ? "1" : "0", VisibilityPropertyOptions.Public) },
+                    { ArenaWKey, new SessionProperty(game.w.ToString("R", Inv), VisibilityPropertyOptions.Public) },
+                    { ArenaHKey, new SessionProperty(game.h.ToString("R", Inv), VisibilityPropertyOptions.Public) },
+                    // Indexed so Quick Match can FILTER on it — mismatched versions are never even found.
+                    { VerKey, new SessionProperty(GameVer, VisibilityPropertyOptions.Public, PropertyIndex.String1) }
+                }
+            }.WithRelayNetwork();
+        }
+
+        // Copy the host's match config (seed / settings / arena) onto this game. Refuses (leaves the
+        // session) if the host runs a different game version — mixed versions are a guaranteed desync.
+        static async Task<bool> AdoptHostProperties(Game game)
+        {
+            var props = Session?.Properties;
+            if (props == null) return true;
+            if (props.TryGetValue(VerKey, out var v) && v.Value != GameVer)
+            {
+                Status = "Version mismatch — someone needs to update the game";
+                Debug.LogWarning($"[MUTAGEN][net] refused session: host ver {v.Value} vs ours {GameVer}");
+                try { await Session.LeaveAsync(); } catch { }
+                Session = null;
+                return false;
+            }
+            if (props.TryGetValue(SeedKey, out var p)) game.seedText = p.Value;
+            if (props.TryGetValue(AutocastKey, out var ac)) game.autocast = ac.Value == "1";
+            if (props.TryGetValue(ArenaWKey, out var aw) && props.TryGetValue(ArenaHKey, out var ah) &&
                 float.TryParse(aw.Value, System.Globalization.NumberStyles.Float, Inv, out float arenaW) &&
                 float.TryParse(ah.Value, System.Globalization.NumberStyles.Float, Inv, out float arenaH))
                 game.ApplyArena(arenaW, arenaH); // simulate the host's exact arena (screen-fit differs per device)
-            ReadyToStart = true; // localIndex + seed set — safe for CoopSync to auto-start now
-            Status = $"Joined · seed {seed}";
-            Debug.Log($"[MUTAGEN][net] Joined session {Session.Id}.   seed = {seed}");
+            return true;
         }
     }
 }

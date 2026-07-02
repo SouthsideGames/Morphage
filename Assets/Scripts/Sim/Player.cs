@@ -65,7 +65,7 @@ namespace Mutagen
         public int Stacks(string id) => mutations.TryGetValue(id, out int s) ? s : 0;
         public bool HasMove(string id) { for (int i = 0; i < 4; i++) if (moveSlots[i] == id) return true; return false; }
         public int FreeMoveSlot() { for (int i = 0; i < 4; i++) if (moveSlots[i] == null) return i; return -1; }
-        public float CdMul() => Mathf.Pow(0.88f, Stacks("arms")) * hasteMul
+        public float CdMul() => SimMath.PowInt(0.88f, Stacks("arms")) * hasteMul
             * (Has("haste") && Has("reflexes") ? 0.92f : 1f);                       // +2 Arms / Adrenal Glands; Adrenaline synergy
         public float SpikeDamage() => (spikeDmg + (Has("thick") ? maxHp * 0.06f : 0f))
             * (Has("quills") && Has("carapace") ? 1.5f : 1f);                        // Thornmail synergy
@@ -136,7 +136,7 @@ namespace Mutagen
         // ---------------------------------------------------------------- move helpers
         public void MeleeArc(Game game, float range, float arc, float dmg, Color color)
         {
-            float baseA = Mathf.Atan2(facingY, facingX);
+            float baseA = SimMath.Atan2(facingY, facingX); // deterministic: gameplay angle (cross-platform lockstep)
             for (int i = 0; i < 10; i++)
             {
                 float a = baseA + Fx.Rand(-arc / 2f, arc / 2f);
@@ -147,14 +147,14 @@ namespace Mutagen
             {
                 var e = es[i]; float dx = e.x - x, dy = e.y - y, d = Mathf.Sqrt(dx * dx + dy * dy);
                 if (d > range + e.r) continue;
-                float da = Mathf.Atan2(Mathf.Sin(Mathf.Atan2(dy, dx) - baseA), Mathf.Cos(Mathf.Atan2(dy, dx) - baseA));
-                if (Mathf.Abs(da) < arc / 2f + 0.2f) e.Hurt(dmg, game, this, Mathf.Cos(baseA) * 8f, Mathf.Sin(baseA) * 8f);
+                float da = SimMath.Atan2(SimMath.Sin(SimMath.Atan2(dy, dx) - baseA), SimMath.Cos(SimMath.Atan2(dy, dx) - baseA));
+                if (Mathf.Abs(da) < arc / 2f + 0.2f) e.Hurt(dmg, game, this, SimMath.Cos(baseA) * 8f, SimMath.Sin(baseA) * 8f);
             }
         }
 
         public void Cone(Game game, float range, float half, float dmg, bool burn)
         {
-            float baseA = Mathf.Atan2(facingY, facingX);
+            float baseA = SimMath.Atan2(facingY, facingX); // deterministic: gameplay angle (cross-platform lockstep)
             for (int i = 0; i < 14; i++)
             {
                 float a = baseA + Fx.Rand(-half, half), s = Fx.Rand(120f, range * 2.2f);
@@ -165,11 +165,11 @@ namespace Mutagen
             {
                 var e = es[i]; float dx = e.x - x, dy = e.y - y, d = Mathf.Sqrt(dx * dx + dy * dy);
                 if (d > range + e.r) continue;
-                float da = Mathf.Atan2(Mathf.Sin(Mathf.Atan2(dy, dx) - baseA), Mathf.Cos(Mathf.Atan2(dy, dx) - baseA));
+                float da = SimMath.Atan2(SimMath.Sin(SimMath.Atan2(dy, dx) - baseA), SimMath.Cos(SimMath.Atan2(dy, dx) - baseA));
                 if (Mathf.Abs(da) < half + 0.15f)
                 {
                     float mult = (burn && Has("venom") && e.poisonT > 0f) ? 1.5f : 1f; // Wildfire
-                    e.Hurt(dmg * mult, game, this, Mathf.Cos(baseA) * 6f, Mathf.Sin(baseA) * 6f);
+                    e.Hurt(dmg * mult, game, this, SimMath.Cos(baseA) * 6f, SimMath.Sin(baseA) * 6f);
                     if (burn) e.ApplyPoison(6f + atkDmg * 0.2f);
                 }
             }
@@ -199,19 +199,20 @@ namespace Mutagen
         public void ProjAim(Game game, float dmg, Color color, float poison)
         {
             AimNearest(game);
-            float a = Mathf.Atan2(facingY, facingX); const float sp = 560f;
-            game.AddProjectile(x, y, Mathf.Cos(a) * sp, Mathf.Sin(a) * sp, true, dmg, color, 6f, 1.4f, poison, this);
+            float a = SimMath.Atan2(facingY, facingX); const float sp = 560f;
+            game.AddProjectile(x, y, SimMath.Cos(a) * sp, SimMath.Sin(a) * sp, true, dmg, color, 6f, 1.4f, poison, this);
             Vfx.Spawn("PoisonCloud", x, y, 26f);
         }
 
         public void Spread(Game game, int n, float dmg, Color color)
         {
             AimNearest(game);
-            float baseA = Mathf.Atan2(facingY, facingX); const float sp = 520f, span = 0.5f;
+            float baseA = SimMath.Atan2(facingY, facingX);
+            const float sp = 520f, span = 0.5f;
             for (int i = 0; i < n; i++)
             {
                 float a = baseA + (i - (n - 1) / 2f) * (span / Mathf.Max(1, n - 1));
-                game.AddProjectile(x, y, Mathf.Cos(a) * sp, Mathf.Sin(a) * sp, true, dmg, color, 5f, 1.2f, 0f, this);
+                game.AddProjectile(x, y, SimMath.Cos(a) * sp, SimMath.Sin(a) * sp, true, dmg, color, 5f, 1.2f, 0f, this);
             }
         }
 
@@ -258,7 +259,7 @@ namespace Mutagen
             for (int i = 0; i < n; i++)
             {
                 float a = i / (float)n * TAU;
-                game.AddProjectile(x, y, Mathf.Cos(a) * sp, Mathf.Sin(a) * sp, true, dmg, color, 5f, 1.0f, 0f, this);
+                game.AddProjectile(x, y, SimMath.Cos(a) * sp, SimMath.Sin(a) * sp, true, dmg, color, 5f, 1.0f, 0f, this);
             }
             Vfx.Spawn("Poof", x, y, 24f);
         }
@@ -288,7 +289,7 @@ namespace Mutagen
         // Frost Breath: a forward cone that damages and slows (clone of Cone, no burn).
         public void FrostCone(Game game, float range, float half, float dmg, Color color)
         {
-            float baseA = Mathf.Atan2(facingY, facingX);
+            float baseA = SimMath.Atan2(facingY, facingX); // deterministic: gameplay angle (cross-platform lockstep)
             for (int i = 0; i < 14; i++)
             {
                 float a = baseA + Fx.Rand(-half, half), s = Fx.Rand(120f, range * 2.2f);
@@ -299,7 +300,7 @@ namespace Mutagen
             {
                 var e = es[i]; float dx = e.x - x, dy = e.y - y, d = Mathf.Sqrt(dx * dx + dy * dy);
                 if (d > range + e.r) continue;
-                float da = Mathf.Atan2(Mathf.Sin(Mathf.Atan2(dy, dx) - baseA), Mathf.Cos(Mathf.Atan2(dy, dx) - baseA));
+                float da = SimMath.Atan2(SimMath.Sin(SimMath.Atan2(dy, dx) - baseA), SimMath.Cos(SimMath.Atan2(dy, dx) - baseA));
                 if (Mathf.Abs(da) < half + 0.15f) { e.Hurt(dmg, game, this); e.ApplySlow(0.5f, 2f); }
             }
         }
@@ -329,7 +330,7 @@ namespace Mutagen
         // Tentacle Lash: strike ahead, dragging caught foes toward you (pull = knockback inward) + slow.
         public void Lash(Game game, float range, float dmg, Color color)
         {
-            float baseA = Mathf.Atan2(facingY, facingX);
+            float baseA = SimMath.Atan2(facingY, facingX); // deterministic: gameplay angle (cross-platform lockstep)
             for (int i = 0; i < 10; i++)
             {
                 float ti = i / 9f;
@@ -340,7 +341,7 @@ namespace Mutagen
             {
                 var e = es[i]; float dx = e.x - x, dy = e.y - y, d = Mathf.Sqrt(dx * dx + dy * dy); if (d == 0f) d = 1f;
                 if (d > range + e.r) continue;
-                float da = Mathf.Atan2(Mathf.Sin(Mathf.Atan2(dy, dx) - baseA), Mathf.Cos(Mathf.Atan2(dy, dx) - baseA));
+                float da = SimMath.Atan2(SimMath.Sin(SimMath.Atan2(dy, dx) - baseA), SimMath.Cos(SimMath.Atan2(dy, dx) - baseA));
                 if (Mathf.Abs(da) < 0.7f)
                 {
                     float pull = Mathf.Min(d - 20f, 90f); if (pull < 0f) pull = 0f;
@@ -408,7 +409,7 @@ namespace Mutagen
             float dx = facingX, dy = facingY;
             if (_lastMove.sqrMagnitude > 0.0001f) { var m = _lastMove.normalized; dx = m.x; dy = m.y; }
             _dashVel = new Vector2(dx * 640f, dy * 640f); dashTime = 0.14f; invuln = 0.22f; dashing = true; chargeDmg = 0f;
-            dashCdMax = 1.3f * (stormborn ? 0.5f : 1f) * Mathf.Pow(0.9f, Stacks("wings"));
+            dashCdMax = 1.3f * (stormborn ? 0.5f : 1f) * SimMath.PowInt(0.9f, Stacks("wings"));
             dashCd = dashCdMax; Sfx.Dash(); Haptics.Light();
             for (int i = 0; i < 8; i++)
                 game.AddParticle(x, y, -dx * Fx.Rand(20f, 80f), -dy * Fx.Rand(20f, 80f), .3f, Palette.Xp, 4f);

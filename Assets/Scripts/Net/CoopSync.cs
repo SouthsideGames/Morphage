@@ -35,6 +35,7 @@ namespace Mutagen.Net
     {
         const string InputMsg = "mtick";
         const string ChkMsg = "mchk";
+        const string RematchMsg = "mrst";
         bool _registered, _started, _callbacksHooked;
         Game _game;
 
@@ -53,7 +54,12 @@ namespace Mutagen.Net
                 nm.OnClientDisconnectCallback += id =>
                 {
                     Debug.LogWarning($"[MUTAGEN][net] client disconnected: {id}");
-                    EnsureGame()?.OnPartnerLeft(); // mid-run drop → end the run (no-op unless co-op is playing)
+                    // id == our own client → OUR link died (backgrounded/offline) → no win awarded.
+                    // Also: if this device has no internet at all right now, the "partner disconnect" is
+                    // almost certainly our own link dying (covers the host-side wifi-drop case).
+                    bool ownLink = (NetworkManager.Singleton != null && id == NetworkManager.Singleton.LocalClientId)
+                                   || Application.internetReachability == NetworkReachability.NotReachable;
+                    EnsureGame()?.OnPartnerLeft(ownLink); // no-op unless co-op is playing
                 };
                 _callbacksHooked = true;
             }
@@ -61,6 +67,7 @@ namespace Mutagen.Net
             {
                 nm.CustomMessagingManager.RegisterNamedMessageHandler(InputMsg, OnInput);
                 nm.CustomMessagingManager.RegisterNamedMessageHandler(ChkMsg, OnChecksum);
+                nm.CustomMessagingManager.RegisterNamedMessageHandler(RematchMsg, OnRematch);
                 _registered = true;
                 Debug.Log("[MUTAGEN][net] channels registered");
             }
@@ -158,6 +165,34 @@ namespace Mutagen.Net
                 if (tick >= _minAcceptTick && !_remoteBuf.ContainsKey(tick))
                     _remoteBuf[tick] = new TickInput { tick = tick, moveX = mx, moveY = my, bits = bits, draft = draft };
             }
+        }
+
+        // ---- rematch (host announces a new seed; both peers restart together) ----
+        public static void SendRematch(string seed)
+        {
+            var nm = NetworkManager.Singleton;
+            if (nm == null || !nm.IsListening) return;
+            using var w = new FastBufferWriter(64, Allocator.Temp);
+            w.WriteValueSafe(seed);
+            if (nm.IsHost) nm.CustomMessagingManager.SendNamedMessageToAll(RematchMsg, w); // ReliableSequenced (default)
+            else nm.CustomMessagingManager.SendNamedMessage(RematchMsg, NetworkManager.ServerClientId, w);
+        }
+
+        void OnRematch(ulong sender, FastBufferReader reader)
+        {
+            var nm = NetworkManager.Singleton;
+            if (nm != null && sender == nm.LocalClientId) return;
+            reader.ReadValueSafe(out string seed);
+            var g = EnsureGame();
+            // Only honor a rematch if we're still in this session and idle — otherwise a rematch sent the
+            // instant we left could yank us out of the menu (or interrupt a run) into a match we quit.
+            if (g == null || !g.coop || !CoopNet.Connected || g.state == GameState.Playing)
+            {
+                Debug.Log("[MUTAGEN][net] rematch ignored — no longer in the session");
+                return;
+            }
+            Debug.Log($"[MUTAGEN][net] rematch — seed {seed}");
+            g.seedText = seed; g.StartCoopRun();
         }
 
         Game EnsureGame() => _game != null ? _game : (_game = FindFirstObjectByType<Game>());
