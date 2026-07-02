@@ -37,6 +37,7 @@ namespace Mutagen.Net
         }
 
         const string SeedKey = "seed";
+        const string AutocastKey = "autocast"; // gameplay-affecting setting — must match on both peers
         const int MaxPlayers = 2;
 
         static async Task EnsureSignedIn()
@@ -93,12 +94,14 @@ namespace Mutagen.Net
 
             Status = "Creating game…";
             Debug.Log("[MUTAGEN][net] Host: creating session…");
+            game.autocast = game.ui != null && game.ui.GetAutocast(); // host's setting rules the match
             var options = new SessionOptions
             {
                 MaxPlayers = MaxPlayers,
                 SessionProperties = new Dictionary<string, SessionProperty>
                 {
-                    { SeedKey, new SessionProperty(seed, VisibilityPropertyOptions.Public) }
+                    { SeedKey, new SessionProperty(seed, VisibilityPropertyOptions.Public) },
+                    { AutocastKey, new SessionProperty(game.autocast ? "1" : "0", VisibilityPropertyOptions.Public) }
                 }
             }.WithRelayNetwork();
 
@@ -133,6 +136,8 @@ namespace Mutagen.Net
             string seed = "";
             if (Session.Properties != null && Session.Properties.TryGetValue(SeedKey, out var p)) seed = p.Value;
             game.seedText = seed;
+            if (Session.Properties != null && Session.Properties.TryGetValue(AutocastKey, out var ac))
+                game.autocast = ac.Value == "1"; // adopt the host's gameplay settings (must match to stay in sync)
             ReadyToStart = true; // localIndex + seed set — safe for CoopSync to auto-start now
             Status = $"Joined · seed {seed}";
             Debug.Log($"[MUTAGEN][net] Joined session {Session.Id}.   seed = {seed}");

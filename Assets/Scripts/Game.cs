@@ -106,7 +106,7 @@ namespace Mutagen
         byte _pendingDraftByte;      // co-op: the local hero's queued upgrade pick, sent with the next input
         const int InputDelay = 4;   // ticks of input pipeline (hides ~66ms of latency)
         const int Redundancy = 12;  // recent inputs repeated in each packet (survives dropped packets)
-        readonly Dictionary<int, ulong> _localChecksums = new(); // co-op: our state hash at checksum ticks
+        readonly Dictionary<int, (ulong hash, Net.StateSnap snap)> _localChecksums = new(); // co-op: our state hash + parts at checksum ticks
         int _nextCompareTick;
         bool _desynced;
         const int ChecksumInterval = 30; // hash + compare full state every 30 ticks (~0.5s)
@@ -277,7 +277,12 @@ namespace Mutagen
                     _stepInput[localIndex] = localIn;
                     _stepInput[1 - localIndex] = remoteIn;
                     Step(FIXED);
-                    if (_execTick % ChecksumInterval == 0) { ulong h = Checksum(); _localChecksums[_execTick] = h; Net.CoopSync.SendChecksum(_execTick, h); }
+                    if (_execTick % ChecksumInterval == 0)
+                    {
+                        ulong h = Checksum(); var snap = Snapshot();
+                        _localChecksums[_execTick] = (h, snap);
+                        Net.CoopSync.SendChecksum(_execTick, h, snap);
+                    }
                     Net.CoopSync.RemoveRemote(_execTick);
                     _localBuf.Remove(_execTick - InputDelay - Redundancy);
                     _execTick++;
@@ -288,6 +293,7 @@ namespace Mutagen
                     ResendRecent();
                     if (++_stallFrames == 90)
                         Debug.LogWarning($"[MUTAGEN][net] stalled at tick {_execTick} (~1.5s) — waiting for partner (lag/packet loss)");
+                    if (_stallFrames >= 600) OnPartnerLeft(); // ~10s of silence: treat as a dead connection, don't freeze forever
                 }
                 else _stallFrames = 0;
                 if (_accum > FIXED * 30f) _accum = FIXED * 30f; // cap catch-up backlog
@@ -789,6 +795,7 @@ namespace Mutagen
         // spawn/enemy-AI/projectile/RNG determinism. Destructive: resets any in-progress run.
         public void RunDeterminismCheck(int ticks = 600)
         {
+            if (Net.CoopNet.Connected) { Debug.LogWarning("[MUTAGEN] determinism check unavailable during a co-op session"); return; }
             uint seed = Rng.SeedToInt("determinism-probe");
             ulong a = SimulateHeadless(seed, ticks);
             ulong b = SimulateHeadless(seed, ticks);
@@ -935,6 +942,7 @@ namespace Mutagen
         public void StartCoopRun()
         {
             coop = true;
+            endless = true; // co-op is last-one-standing survival — no campaign win, and identical rules on both peers
             Rng.Set(Rng.SeedToInt(seedText));
             Reset();
             // Prime the input pipeline: the first InputDelay ticks run neutral input on both sides, so
@@ -967,22 +975,45 @@ namespace Mutagen
             if (_sendBatch.Count > 0) Net.CoopSync.SendBatch(_sendBatch);
         }
 
-        // Compare our state hash against the partner's at each checksum tick; flag the first divergence.
+        // Compare our state hash against the partner's at each checksum tick; flag the first divergence
+        // and log WHICH state component differs (rng / counts / hero stats) to pinpoint the leak.
         void CompareChecksums()
         {
             while (_localChecksums.TryGetValue(_nextCompareTick, out var local) &&
-                   Net.CoopSync.TryGetRemoteChecksum(_nextCompareTick, out var remote))
+                   Net.CoopSync.TryGetRemoteChecksum(_nextCompareTick, out var remoteHash, out var remoteSnap))
             {
-                if (local != remote && !_desynced)
+                if (local.hash != remoteHash && !_desynced)
                 {
                     _desynced = true;
-                    Debug.LogError($"[MUTAGEN][net] DESYNC at tick {_nextCompareTick}: local {local:X16} vs peer {remote:X16}");
+                    Debug.LogError($"[MUTAGEN][net] DESYNC at tick {_nextCompareTick}: local {local.hash:X16} vs peer {remoteHash:X16}\n"
+                                   + Net.StateSnap.Diff(local.snap, remoteSnap));
                     SetBanner("DESYNC", "games drifted out of sync", Palette.HurtRed, 6f);
                 }
                 _localChecksums.Remove(_nextCompareTick);
                 Net.CoopSync.RemoveRemoteChecksum(_nextCompareTick);
                 _nextCompareTick += ChecksumInterval;
             }
+        }
+
+        // Key state parts sent alongside each checksum — so a desync log can say what diverged.
+        Net.StateSnap Snapshot() => new Net.StateSnap
+        {
+            rng = (uint)Rng.State, wave = wave, enemies = enemies.Count, projectiles = projectiles.Count,
+            p0hp = players[0]?.hp ?? -1f, p0xp = players[0]?.xp ?? -1f, p0lvl = players[0]?.level ?? -1,
+            p1hp = players[1]?.hp ?? -1f, p1xp = players[1]?.xp ?? -1f, p1lvl = players[1]?.level ?? -1,
+        };
+
+        // The other player dropped (connection lost or ~10s of lockstep silence): competitive rules say
+        // the one who stays wins. Ends the run cleanly instead of freezing at the stalled tick.
+        public void OnPartnerLeft()
+        {
+            if (!coop || state != GameState.Playing) return;
+            Debug.LogWarning("[MUTAGEN][net] partner left — ending co-op run");
+            state = GameState.Dead; Sfx.Over();
+            CaptureMonster(true);
+            SaveSystem.AddCoopResult(true);
+            ui.HideDraft();
+            ui.ShowCoopEnd(true, false, "Opponent Left");
         }
         public void GotoMenu() { ReleaseAll(); state = GameState.Menu; _paused = false; ui.HideEnd(); ui.HideDraft(); ui.HideReplace(); ui.HidePause(); ui.ShowStart(); }
 
@@ -1191,24 +1222,33 @@ namespace Mutagen
         public void Shake(float a) { if (GameSettings.ScreenShake && _juice != null) _juice.Shake(a); }
         public void ToggleDebug() { debug = !debug; ui.SetDebugVisible(debug); }
 
-        public void DebugGod() { god = !god; ui.RefreshGodBtn(); }
-        public void DebugLevel() { if (player != null) player.AddXp(player.xpNext - player.xp + 1f, this); }
-        public void DebugDna() { if (player != null) player.AddXp(200f, this); }
+        // Sim-mutating debug actions change only THIS machine's game — in a connected co-op match that is
+        // a guaranteed desync, so they're locked out while connected.
+        bool DebugLockedInCoop()
+        {
+            if (!Net.CoopNet.Connected) return false;
+            SetBanner("DEBUG LOCKED IN CO-OP", "it would desync the games", Palette.HurtRed, 1.6f);
+            return true;
+        }
+
+        public void DebugGod() { if (DebugLockedInCoop()) return; god = !god; ui.RefreshGodBtn(); }
+        public void DebugLevel() { if (DebugLockedInCoop()) return; if (player != null) player.AddXp(player.xpNext - player.xp + 1f, this); }
+        public void DebugDna() { if (DebugLockedInCoop()) return; if (player != null) player.AddXp(200f, this); }
         public void DebugSlow() { slowmo = !slowmo; }
         // Toggle co-op mode from the debug panel. Takes effect on the NEXT run (Reset spawns hero 2).
-        public void DebugCoop() { coop = !coop; ui.RefreshCoopBtn(); }
+        public void DebugCoop() { if (DebugLockedInCoop()) return; coop = !coop; ui.RefreshCoopBtn(); }
         public void DebugTouch() { TouchInput.ForceTouch = !TouchInput.ForceTouch; }
-        public void DebugKillAll() { foreach (var e in new List<Enemy>(enemies)) if (!e.dead) e.Die(this); }
-        public void DebugSpawnBoss() { if (state == GameState.Playing) SpawnBoss(); }
+        public void DebugKillAll() { if (DebugLockedInCoop()) return; foreach (var e in new List<Enemy>(enemies)) if (!e.dead) e.Die(this); }
+        public void DebugSpawnBoss() { if (DebugLockedInCoop()) return; if (state == GameState.Playing) SpawnBoss(); }
         public void DebugSpawn(string id)
         {
-            if (state != GameState.Playing) return;
+            if (state != GameState.Playing || DebugLockedInCoop()) return;
             EdgeSpawn(out float x, out float y);
             SpawnType(id, x, y, WaveScale);
         }
         public void DebugGrantMutation()
         {
-            if (player == null) return;
+            if (player == null || DebugLockedInCoop()) return;
             var opts = mutations.Available(player);
             if (opts.Count == 0) return;
             var def = opts[Rng.RandI(0, opts.Count - 1)];

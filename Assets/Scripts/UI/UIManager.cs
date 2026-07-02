@@ -575,7 +575,7 @@ namespace Mutagen
 
         // Competitive co-op result: Winner / Defeated / Draw, with the local hero's stats, the partner's
         // outcome, and this device's running record.
-        public void ShowCoopEnd(bool won, bool draw)
+        public void ShowCoopEnd(bool won, bool draw, string eyebrow = null)
         {
             var g = _game; var p = g.player; var s = g.stats;
             _dWave.text = g.wave.ToString();
@@ -585,7 +585,7 @@ namespace Mutagen
             _dDps.text = Mathf.Round(s.damageDealt / Mathf.Max(s.time, 1f)).ToString();
             _dTaken.text = Mathf.Round(s.damageTaken).ToString();
             _dSeed.text = $"Co-op record: {SaveSystem.CoopWins}W · {SaveSystem.CoopLosses}L";
-            if (_endEyebrow != null) _endEyebrow.text = draw ? "Both Fell" : won ? "Last One Standing" : "Outlasted";
+            if (_endEyebrow != null) _endEyebrow.text = eyebrow ?? (draw ? "Both Fell" : won ? "Last One Standing" : "Outlasted");
             if (_endBig != null) { _endBig.text = draw ? "DRAW" : won ? "WINNER" : "DEFEATED"; _endBig.style.color = won ? Palette.Dna : Palette.Ink; }
             var partner = g.Partner();
             _dMuts.text = partner != null
