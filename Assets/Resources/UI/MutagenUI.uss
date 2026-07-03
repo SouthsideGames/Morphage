@@ -24,13 +24,13 @@
 .fill { position: absolute; top: 0; left: 0; bottom: 0; width: 100%; }
 .fill.hp { background-color: var(--hp); }
 .fill.xp { background-color: var(--dna); }
-.bartxt { position: absolute; top: 0; left: 0; right: 0; bottom: 0; font-size: 9px; color: rgb(6,20,15); -unity-font-style: bold; -unity-text-align: middle-center; }
+.bartxt { position: absolute; top: 0; left: 0; right: 0; bottom: 0; font-size: 9px; color: rgb(228,248,239); -unity-font-style: bold; -unity-text-align: middle-center; text-shadow: 0 1px 2px rgba(4,12,10,0.9); }
 
 .pills { flex-direction: column; align-items: flex-end; margin-right: 48px; }
 .pill { flex-direction: row; align-items: center; margin-bottom: 6px; }
 .k { font-size: 9px; letter-spacing: 2px; color: var(--muted); -unity-font-style: bold; margin-right: 8px; }
 .pillval { font-size: 20px; color: var(--ink); -unity-font-style: bold; }
-.pillval.dna { font-size: 15px; color: var(--dna); }
+.pillval.dna { color: var(--dna); } /* same size as LVL/WAVE — colour alone distinguishes it */
 
 .muts { position: absolute; left: 16px; bottom: 14px; flex-direction: row; flex-wrap: wrap; max-width: 60%; }
 .mtag { flex-direction: row; align-items: center; background-color: rgba(255,61,154,0.10); border-width: 1px; border-color: rgba(255,61,154,0.35); color: rgb(255,208,230); font-size: 11px; padding: 4px 9px; border-radius: 20px; margin-right: 6px; margin-bottom: 6px; }
@@ -48,7 +48,6 @@
 .hud.touch .bartxt { font-size: 11px; }
 .hud.touch .k { font-size: 15px; }
 .hud.touch .pillval { font-size: 34px; }
-.hud.touch .pillval.dna { font-size: 26px; }
 
 /* ---------- overlays ---------- */
 .overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; align-items: center; justify-content: center; background-color: rgba(7,17,15,0.94); }
@@ -67,10 +66,32 @@
 .mobile .cardname { font-size: 15px; margin-bottom: 4px; }
 .mobile .carddesc { font-size: 10px; }
 .mobile .reroll { margin-top: 10px; }
+
+/* evolve panel: compact enough to fit WITHOUT scrolling, even in phone landscape */
+#levelOverlay .unity-scroll-view__content-container { padding: 6px 12px; }
+.mobile #levelOverlay .big { font-size: 26px; margin-bottom: 4px; }
+.mobile #levelOverlay .card { padding: 10px 12px; }
+.mobile #levelOverlay .glyph { width: 40px; height: 40px; margin-bottom: 6px; }
+.mobile #levelOverlay .reroll { margin-top: 6px; }
+
+/* death/result panel: compact enough to fit without scrolling (stats collapse to one tight row) */
+#deathOverlay .unity-scroll-view__content-container { padding: 6px 12px; }
+.mobile #deathOverlay .big { font-size: 30px; margin-bottom: 4px; }
+.mobile #deathOverlay .deathstats { margin-bottom: 6px; max-width: 640px; }
+.mobile #deathOverlay .dstat { width: 100px; margin: 4px 0; }
+.mobile #deathOverlay .dval { font-size: 20px; }
+.mobile #deathOverlay .sub { font-size: 12px; margin-bottom: 2px; }
+.mobile #deathOverlay .btnrow { margin-top: 8px; }
+
+/* first-run tutorial: centred prompt under the topbar + a glow on the button being taught */
+.tutlabel { position: absolute; top: 64px; left: 0; right: 0; -unity-text-align: middle-center; font-size: 16px; color: var(--dna); -unity-font-style: bold; text-shadow: 0 1px 3px rgba(4,12,10,0.9); }
+.hud.touch .tutlabel { top: 80px; font-size: 19px; }
+.mslot.tuthl { border-color: var(--dna); border-width: 2px; }
 .mobile .big.menutitle { font-size: 44px; } /* keep the main-menu title prominent */
 
-/* mobile: move the LVL/WAVE/DNA readout to the top-centre, clear of the right-side action buttons */
-.mobile .pills { position: absolute; top: 4px; left: 0; right: 0; flex-direction: row; justify-content: center; align-items: flex-start; margin-right: 0; }
+/* mobile: LVL/WAVE/DNA readout along the top — starts AFTER the HP/XP bars (≈290px) and stops before
+   the pause button, so it can never overlap either at any screen shape */
+.mobile .pills { position: absolute; top: 4px; left: 290px; right: 96px; flex-direction: row; justify-content: center; align-items: flex-start; margin-right: 0; }
 .mobile .pill { flex-direction: row; align-items: center; margin: 0 12px; margin-bottom: 0; }
 .eyebrow { font-size: 13px; letter-spacing: 7px; color: var(--mut); -unity-font-style: bold; margin-bottom: 8px; }
 .big { font-size: 46px; -unity-font-style: bold; color: var(--ink); margin-bottom: 10px; -unity-text-align: middle-center; }
@@ -116,7 +137,8 @@
 .ver { font-size: 10px; letter-spacing: 3px; color: var(--muted); opacity: 0.5; margin-top: 10px; }
 
 /* ---------- debug ---------- */
-.debug { position: absolute; right: 10px; top: 64px; width: 210px; background-color: var(--panel); border-width: 1px; border-color: var(--line); border-radius: 10px; padding: 10px; }
+.debug { position: absolute; right: 10px; top: 64px; width: 210px; max-height: 80%; background-color: var(--panel); border-width: 1px; border-color: var(--line); border-radius: 10px; padding: 10px; }
+.dbgscroll { flex-grow: 1; flex-shrink: 1; }
 .dbgtitle { font-size: 9px; letter-spacing: 2px; color: var(--mut); -unity-font-style: bold; margin-bottom: 6px; }
 .dbginfo { font-size: 10px; color: rgb(158,201,189); white-space: normal; margin-bottom: 6px; }
 .dbggrid { flex-direction: row; flex-wrap: wrap; }

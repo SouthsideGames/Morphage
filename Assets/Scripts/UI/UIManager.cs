@@ -23,9 +23,12 @@ namespace Mutagen
         Button _hapticsToggle, _shakeToggle, _clearDataBtn, _perfToggle, _handToggle;
         int _titleTaps;
         VisualElement _hpFill, _xpFill, _muts, _cards;
-        Label _hpTxt, _xpTxt, _lvlVal, _waveVal, _dnaVal, _partnerHp, _desyncInfo;
+        Label _hpTxt, _xpTxt, _lvlVal, _waveVal, _dnaVal, _partnerHp, _desyncInfo, _devIndicator;
         // Co-op menu controls (bound from the coop overlay in UXML)
         Button _hostBtn, _joinBtn, _quickBtn; TextField _codeField; Label _netStatus;
+        VisualElement _matchOverlay; Label _matchStatus; string _matchBase; int _matchDots;
+        Label _tutLabel; int _tutSlot = -1; // first-run onboarding prompt + pulsing button highlight
+        VisualElement _balanceOverlay, _balanceList; Label _balanceStatus; Button _balanceDone;
         Label _dWave, _dLvl, _dKills, _dTime, _dDps, _dTaken, _dMuts, _dSeed, _dbgInfo, _dbgTitle;
         Label _banner, _endEyebrow, _endBig, _replaceTitle, _replaceSub;
         VisualElement _movebar, _replaceOverlay, _replaceSlots, _settingsOverlay, _bindList, _pauseOverlay;
@@ -175,7 +178,7 @@ namespace Mutagen
             _root.Q<Button>("beginBtn").clicked += () => _game.StartRun();
             _root.Q<Button>("replayBtn").clicked += () =>
             {
-                if (_game.coop && Net.CoopNet.Connected) _game.RequestRematch(); else _game.ReplaySeed();
+                if (_game.coop && Net.CoopNet.Connected) _game.RematchClicked(); else _game.ReplaySeed();
             };
             _root.Q<Button>("menuBtn").clicked += () => _game.GotoMenu();
             _rerollBtn.clicked += () => _game.Reroll();
@@ -238,10 +241,32 @@ namespace Mutagen
             if (_joinBtn != null) _joinBtn.clicked += OnJoinClicked;
             _codeField = _root.Q<TextField>("coopCodeField");
             _netStatus = _root.Q<Label>("netStatus");
+            _matchOverlay = Q("matchOverlay");
+            _matchStatus = _root.Q<Label>("matchStatus");
+            var matchCancel = _root.Q<Button>("matchCancel");
+            if (matchCancel != null) matchCancel.clicked += CancelMatchmaking;
+            // gentle "Searching…" pulse while the popup is up
+            _root.schedule.Execute(() =>
+            {
+                if (_matchOverlay == null || _matchOverlay.style.display == DisplayStyle.None || _matchStatus == null) return;
+                _matchDots = (_matchDots + 1) % 4;
+                _matchStatus.text = _matchBase + new string('.', _matchDots);
+            }).Every(450);
             var bindReset = _root.Q<Button>("bindReset");
             if (bindReset != null) bindReset.clicked += () => { Binds.Reset(); RenderBinds(); };
             _pauseOverlay = Q("pauseOverlay"); _pauseBtn = _root.Q<Button>("pauseBtn");
-            if (_pauseBtn != null) _pauseBtn.clicked += _game.TogglePause;
+            if (_pauseBtn != null)
+            {
+                _pauseBtn.clicked += _game.TogglePause;
+                // Image icon — the "❚❚" glyph isn't in the game font (renders as tofu boxes on devices).
+                var pauseTex = LoadIcon("Icons/Pause");
+                if (pauseTex != null)
+                {
+                    _pauseBtn.text = "";
+                    _pauseBtn.style.backgroundImage = new StyleBackground(pauseTex);
+                    _pauseBtn.style.unityBackgroundImageTintColor = new Color(0.85f, 1f, 0.94f);
+                }
+            }
             var resumeBtn = _root.Q<Button>("resumeBtn");
             if (resumeBtn != null) resumeBtn.clicked += _game.TogglePause;
             var pauseMenuBtn = _root.Q<Button>("pauseMenuBtn");
@@ -255,6 +280,8 @@ namespace Mutagen
             Hide(_codexOverlay);
             Hide(_galleryOverlay);
             Hide(_gameModeOverlay);
+            Hide(_matchOverlay);
+            Hide(_balanceOverlay);
             Hide(_pauseOverlay);
             if (_pauseBtn != null) _pauseBtn.style.display = DisplayStyle.None;
             if (_banner != null) _banner.style.display = DisplayStyle.None;
@@ -276,9 +303,25 @@ namespace Mutagen
             if (dbgDeterm != null) dbgDeterm.clicked += () => _game.RunDeterminismCheck(600);
             var dbgCoop = _root.Q<Button>("dbgCoop");
             if (dbgCoop != null) dbgCoop.clicked += _game.DebugCoop;
+            _balanceOverlay = Q("balanceOverlay"); _balanceList = Q("balanceList");
+            _balanceStatus = _root.Q<Label>("balanceStatus"); _balanceDone = _root.Q<Button>("balanceDone");
+            var dbgBalance = _root.Q<Button>("dbgBalance");
+            if (dbgBalance != null) dbgBalance.clicked += () =>
+            {
+                if (_game.state != GameState.Menu) return;
+                _balanceList?.Clear();
+                SetBalanceStatus("Starting…");
+                Show(_balanceOverlay); _balanceOverlay?.BringToFront();
+                _game.StartBalanceSim();
+            };
+            if (_balanceDone != null) _balanceDone.clicked += () =>
+            {
+                if (_game.BalanceRunning) _game.StopBalanceSim();
+                else Hide(_balanceOverlay);
+            };
 
             // Make every full-screen panel scroll when its content is taller than the safe area.
-            foreach (var ov in new[] { _startOverlay, _settingsOverlay, _codexOverlay, _galleryOverlay, _gameModeOverlay, _levelOverlay, _deathOverlay, _replaceOverlay, _pauseOverlay })
+            foreach (var ov in new[] { _startOverlay, _settingsOverlay, _codexOverlay, _galleryOverlay, _gameModeOverlay, _balanceOverlay, _levelOverlay, _deathOverlay, _replaceOverlay, _pauseOverlay })
                 WrapInScroll(ov);
 
             Hide(_levelOverlay); Hide(_deathOverlay); Hide(_debug);
@@ -308,12 +351,68 @@ namespace Mutagen
             _partnerHp.style.color = new Color(0.45f, 0.7f, 1f);
             _partnerHp.style.display = DisplayStyle.None;
             _root.Add(_partnerHp);
+
+            // First-run tutorial prompt (inside the HUD so it inherits safe-area padding).
+            _tutLabel = new Label();
+            _tutLabel.AddToClassList("tutlabel");
+            _tutLabel.style.display = DisplayStyle.None;
+            _hud?.Add(_tutLabel);
+
+            // Persistent developer-mode indicator: small text pinned top-left, on top of the menu.
+            // Stays visible for as long as dev mode is armed (added last so it renders above overlays).
+            _devIndicator = new Label("DEVELOPER MODE");
+            _devIndicator.style.position = Position.Absolute;
+            _devIndicator.style.top = 6f;
+            _devIndicator.style.left = 8f;
+            _devIndicator.style.fontSize = 9f;
+            _devIndicator.style.letterSpacing = 2f;
+            _devIndicator.style.unityFontStyleAndWeight = FontStyle.Bold;
+            _devIndicator.style.color = Palette.Dna;
+            _root.Add(_devIndicator);
+            RefreshDevIndicator();
+        }
+
+        /// <summary>Reflect the current dev-mode state in the always-on top-left indicator.</summary>
+        public void RefreshDevIndicator()
+        {
+            if (_devIndicator != null)
+                _devIndicator.style.display = DevMode.Enabled ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        /// <summary>Show/hide the onboarding prompt and pulse the relevant move-bar slot (-1 = none).</summary>
+        public void SyncTutorial(string prompt, int highlightSlot)
+        {
+            if (_tutLabel != null)
+            {
+                if (string.IsNullOrEmpty(prompt)) _tutLabel.style.display = DisplayStyle.None;
+                else
+                {
+                    _tutLabel.style.display = DisplayStyle.Flex;
+                    if (_tutLabel.text != prompt) _tutLabel.text = prompt;
+                }
+            }
+            if (string.IsNullOrEmpty(prompt)) highlightSlot = -1;
+            if (_tutSlot != highlightSlot)
+            {
+                if (_tutSlot >= 0 && _slots != null && _tutSlot < _slots.Length) _slots[_tutSlot]?.RemoveFromClassList("tuthl");
+                _tutSlot = highlightSlot;
+                if (_tutSlot >= 0 && _slots != null && _tutSlot < _slots.Length) _slots[_tutSlot]?.AddToClassList("tuthl");
+            }
         }
 
         // Done on the game-mode panel: if a co-op search/host is pending (not yet a live match),
         // abandon it so we don't linger in matchmaking invisibly.
         void CloseCoop()
         {
+            // The seed field doubles as the developer-mode "special call": typing the secret code
+            // toggles the dev tools (debug panel + Balance Lab) on this device instead of seeding a run.
+            if (_seedField != null && string.Equals((_seedField.value ?? "").Trim(), DevMode.Code, System.StringComparison.OrdinalIgnoreCase))
+            {
+                _seedField.value = "";
+                bool on = DevMode.Toggle();
+                if (!on) _game.HideDebugPanel(); // disarming also closes the debug panel
+                RefreshDevIndicator(); // the persistent top-left indicator is the on/off feedback
+            }
             if (!Net.CoopNet.Connected)
             {
                 Net.CoopNet.Leave();
@@ -323,17 +422,38 @@ namespace Mutagen
             HideGameMode();
         }
 
+        void ShowMatchPopup(string baseText)
+        {
+            _matchBase = baseText; _matchDots = 0;
+            if (_matchStatus != null) _matchStatus.text = baseText;
+            Show(_matchOverlay); _matchOverlay?.BringToFront();
+        }
+        public void HideMatchPopup() => Hide(_matchOverlay);
+
+        // Cancel while searching / waiting as an open host: drop the pending session, back to the panel.
+        void CancelMatchmaking()
+        {
+            Net.CoopNet.Leave();
+            _game.coop = false;
+            HideMatchPopup();
+            if (_netStatus != null) _netStatus.text = "";
+        }
+
         async void OnQuickClicked()
         {
             try
             {
                 SetNetButtons(false);
-                if (_netStatus != null) _netStatus.text = "Finding an opponent…";
+                ShowMatchPopup("Searching");
                 await Net.CoopNet.QuickMatchAsync(_game);
+                if (Net.CoopNet.Connected) ShowMatchPopup("Match found");         // run auto-starts in a moment
+                else if (Net.CoopNet.Session != null) ShowMatchPopup("Waiting for an opponent"); // we became the open host
+                else HideMatchPopup();                                             // refused (e.g. version mismatch)
                 if (_netStatus != null) _netStatus.text = Net.CoopNet.Status;
             }
             catch (System.Exception e)
             {
+                HideMatchPopup();
                 if (_netStatus != null) _netStatus.text = "Match failed: " + e.Message;
                 Debug.LogError("[MUTAGEN][net] Quick match failed: " + e);
             }
@@ -355,7 +475,7 @@ namespace Mutagen
                 string seed = UnityEngine.Random.Range(1, int.MaxValue).ToString();
                 string code = await Net.CoopNet.HostAsync(_game, seed);
                 if (_codeField != null) _codeField.value = code;
-                if (_netStatus != null) _netStatus.text = replacing ? "New code — the previous one is cancelled" : "Share this code ↑";
+                if (_netStatus != null) _netStatus.text = replacing ? "New code — the previous one is cancelled" : "Share this code with your friend";
             }
             catch (System.Exception e)
             {
@@ -464,7 +584,7 @@ namespace Mutagen
             var tag = new VisualElement(); tag.AddToClassList("mtag");
             var dot = new VisualElement(); dot.AddToClassList("mtdot"); tag.Add(dot);
             var nm = new Label(); nm.AddToClassList("mtname"); tag.Add(nm);
-            var star = new Label("★"); star.AddToClassList("star"); tag.Add(star);
+            var star = new Label("MAX"); star.AddToClassList("star"); tag.Add(star); // "★" isn't in the game font
             return tag;
         }
 
@@ -632,7 +752,7 @@ namespace Mutagen
         public void UpdateReroll()
         {
             if (_rerollBtn == null) return;
-            _rerollBtn.text = $"↻ Reroll ({_game.rerolls})";
+            _rerollBtn.text = $"Reroll ({_game.rerolls})";
             if (_game.rerolls <= 0) _rerollBtn.AddToClassList("dim"); else _rerollBtn.RemoveFromClassList("dim");
         }
 
@@ -649,7 +769,6 @@ namespace Mutagen
             _dDps.text = Mathf.Round(s.damageDealt / Mathf.Max(s.time, 1f)).ToString();
             _dTaken.text = Mathf.Round(s.damageTaken).ToString();
             _dSeed.text = "seed " + g.seedText;
-            if (_endEyebrow != null) _endEyebrow.text = victory ? "Specimen Ascended" : "Specimen Terminated";
             if (_endBig != null) { _endBig.text = victory ? "VICTORY" : "You Died"; _endBig.style.color = victory ? Palette.Dna : Palette.Ink; }
 
             var names = "";
@@ -657,11 +776,11 @@ namespace Mutagen
             {
                 var d = g.mutations.ById(kv.Key); if (d == null) continue;
                 if (names.Length > 0) names += " · ";
-                names += d.displayName + (kv.Value > 1 ? $" ×{kv.Value}" : "") + (p.evolved.Contains(kv.Key) ? "★" : "");
+                names += d.displayName + (kv.Value > 1 ? $" ×{kv.Value}" : "") + (p.evolved.Contains(kv.Key) ? " MAX" : "");
             }
             _dMuts.text = names.Length > 0 ? "Final form: " + names : "A sad, unmutated blob.";
             var replaySolo = _root.Q<Button>("replayBtn");
-            if (replaySolo != null) { replaySolo.style.display = DisplayStyle.Flex; replaySolo.text = "Replay Seed ▸"; }
+            if (replaySolo != null) { replaySolo.style.display = DisplayStyle.Flex; replaySolo.text = "Replay Seed"; }
             Show(_deathOverlay);
         }
 
@@ -677,36 +796,37 @@ namespace Mutagen
             _dDps.text = Mathf.Round(s.damageDealt / Mathf.Max(s.time, 1f)).ToString();
             _dTaken.text = Mathf.Round(s.damageTaken).ToString();
             _dSeed.text = $"Co-op record: {SaveSystem.CoopWins}W · {SaveSystem.CoopLosses}L";
-            if (_endEyebrow != null) _endEyebrow.text = eyebrow ?? (draw ? "Both Fell" : won ? "Last One Standing" : "Outlasted");
             if (_endBig != null) { _endBig.text = big ?? (draw ? "DRAW" : won ? "WINNER" : "DEFEATED"); _endBig.style.color = won ? Palette.Dna : Palette.Ink; }
+            // The eyebrow subtitle was removed — fold the match context into the partner line instead.
+            string context = eyebrow ?? (draw ? "Both Fell" : won ? "Last One Standing" : "Outlasted");
             var partner = g.Partner();
-            _dMuts.text = partner != null
-                ? $"Partner — Lv {partner.level} · {(draw ? "fell together" : won ? "fell first" : "survived")}"
-                : "";
-            // Host gets a Rematch button (it generates the new seed and pulls the partner in);
-            // the joiner just waits — their game restarts automatically when the host rematches.
+            string pInfo = partner != null ? $"Partner Lv {partner.level} · {(draw ? "fell together" : won ? "fell first" : "survived")}" : "";
+            _dMuts.text = pInfo.Length > 0 ? context + "  ·  " + pInfo : context;
+            // Rematch is a mutual ready-check: either player can offer; it fires when both have tapped.
             var replayC = _root.Q<Button>("replayBtn");
             if (replayC != null)
             {
-                bool canRematch = Net.CoopNet.IsHost && Net.CoopNet.Connected;
+                bool canRematch = Net.CoopNet.Connected;
                 replayC.style.display = canRematch ? DisplayStyle.Flex : DisplayStyle.None;
-                replayC.text = "Rematch ▸";
+                replayC.SetEnabled(true);
+                replayC.text = "Rematch";
             }
             Show(_deathOverlay);
         }
 
         public void HideEnd() => Hide(_deathOverlay);
 
-        // Live check while the co-op result screen is up: if the partner has since left the session,
-        // gray out the Rematch button instead of letting it silently do nothing.
+        // Live state of the co-op result screen: reflect the rematch ready-check, and gray the button
+        // out entirely if the partner has since left the session.
         public void UpdateCoopEnd()
         {
             if (!_game.coop || _deathOverlay == null || _deathOverlay.style.display == DisplayStyle.None) return;
             var b = _root.Q<Button>("replayBtn");
             if (b == null || b.style.display == DisplayStyle.None) return;
-            bool ok = Net.CoopNet.Connected;
-            b.SetEnabled(ok);
-            if (!ok) b.text = "Opponent Left";
+            if (!Net.CoopNet.Connected) { b.SetEnabled(false); b.text = "Opponent Left"; return; }
+            if (_game.RematchWaiting) { b.SetEnabled(false); b.text = "Waiting for opponent…"; return; }
+            b.SetEnabled(true);
+            b.text = _game.RematchOffered ? "Rematch — opponent is ready!" : "Rematch";
         }
 
         public void UpdateBanner()
@@ -745,7 +865,7 @@ namespace Mutagen
             if (_movebar == null) return;
             _movebar.Clear();
             _slots = new VisualElement[5];
-            string[] keys = { "1", "2", "3", "4", "⇧" };
+            string[] keys = { "1", "2", "3", "4", "" }; // dash slot: the icon says it — "⇧" isn't in the game font
             for (int i = 0; i < 5; i++)
             {
                 var s = MakeSlot();
@@ -1015,6 +1135,35 @@ namespace Mutagen
             if (GameSettings.LeftHanded) _hud.AddToClassList("lefthanded"); else _hud.RemoveFromClassList("lefthanded");
         }
 
+        // ---------------------------------------------------------------- balance lab (debug tool)
+        public void SetBalanceStatus(string text)
+        {
+            if (_balanceStatus != null) _balanceStatus.text = text;
+            if (_balanceDone != null) _balanceDone.text = _game.BalanceRunning ? "Stop" : "Done";
+        }
+
+        // Render both report sections as codex-style rows (works on device — no console needed).
+        public void RenderBalanceReport(System.Collections.Generic.List<BalanceRow> sampling, System.Collections.Generic.List<BalanceRow> isolation)
+        {
+            if (_balanceList == null) return;
+            _balanceList.Clear();
+            void Section(string header, System.Collections.Generic.List<BalanceRow> rows)
+            {
+                var h = new Label(header); h.AddToClassList("slabel"); _balanceList.Add(h);
+                foreach (var r in rows)
+                {
+                    var row = new VisualElement(); row.AddToClassList("codexrow");
+                    var head = new VisualElement(); head.AddToClassList("codexhead"); row.Add(head);
+                    var name = new Label(r.title); name.AddToClassList("synname"); head.Add(name);
+                    var right = new Label(r.right); right.AddToClassList("syncat"); head.Add(right);
+                    var det = new Label(r.detail); det.AddToClassList("synrecipe"); row.Add(det);
+                    _balanceList.Add(row);
+                }
+            }
+            Section("SAMPLING — wave lift vs runs without it (co-picks included)", sampling);
+            Section("ISOLATION — forced single-mutation builds vs bite-only baseline", isolation);
+        }
+
         // ---------------------------------------------------------------- synergy codex
         public void ShowCodex() { RenderCodex(); Show(_codexOverlay); _codexOverlay?.BringToFront(); }
         public void HideCodex() { Hide(_codexOverlay); }
@@ -1075,7 +1224,7 @@ namespace Mutagen
 
                 var info = new VisualElement(); info.AddToClassList("ginfo");
                 var name = new Label(rec.name); name.AddToClassList("gname"); info.Add(name);
-                var outcome = new Label((rec.won ? "◆ Victory" : "✕ Fell") + "  ·  Wave " + rec.wave + "  ·  Lv " + rec.level);
+                var outcome = new Label((rec.won ? "Victory" : "Fell") + "  ·  Wave " + rec.wave + "  ·  Lv " + rec.level);
                 outcome.AddToClassList("goutcome"); if (rec.won) outcome.AddToClassList("won"); info.Add(outcome);
                 var stat = new Label(rec.kills + " kills  ·  " + Mathf.RoundToInt(rec.timeSurvived) + "s  ·  " + Mathf.RoundToInt(rec.dps) + " DPS");
                 stat.AddToClassList("gstat"); info.Add(stat);
@@ -1133,7 +1282,7 @@ namespace Mutagen
         public void HideDesyncInfo() => Hide(_desyncInfo);
 
         public void ShowStart() => Show(_startOverlay);
-        public void HideStart() { Hide(_startOverlay); Hide(_gameModeOverlay); } // a match may auto-start from the game-mode panel
+        public void HideStart() { Hide(_startOverlay); Hide(_gameModeOverlay); Hide(_matchOverlay); } // a match may auto-start from the panel or the waiting popup
 
         // ---------------------------------------------------------------- debug / misc
         public void SetDebugVisible(bool v) { if (v) Show(_debug); else Hide(_debug); }

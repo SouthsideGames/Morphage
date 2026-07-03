@@ -21,9 +21,11 @@ namespace Mutagen
 
         /// <param name="key">prefab name under Resources/VFX (e.g. "Explosion")</param>
         /// <param name="scale">world-unit scale; CFXR prefabs are authored small, so scale up</param>
+        public static bool Muted; // balance/mass-sim batches: skip real particle prefabs entirely
+
         public static void Spawn(string key, float x, float y, float scale = 24f)
         {
-            if (_root == null) return;
+            if (Muted || _root == null) return;
             var inst = Acquire(key);
             if (inst == null) return;
 

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -38,6 +39,7 @@ namespace Mutagen
         public RunStats stats = new();
 
         public bool god, debug, slowmo;
+        public bool headless; // mass-simulation batches: suppress UI / audio / archive side effects
         public float hitstop, fps = 60f;
         public string seedText = "";
         public int wave = 1;
@@ -45,6 +47,7 @@ namespace Mutagen
         public SpatialGrid grid;
         public MutationManager mutations;
         public UIManager ui;
+        public readonly Tutorial tutorial = new(); // first-run onboarding (observer only — never touches the sim)
 
         // wave state
         float waveTimer = 22f, spawnCd, intermission;
@@ -165,6 +168,14 @@ namespace Mutagen
             ui = new UIManager(this);
             ui.ShowStart();
             state = GameState.Menu;
+
+            // First-ever launch: skip the menu and drop straight into a guided first run — the
+            // tutorial teaches by playing. One time only; every later launch lands on the menu.
+            if (PlayerPrefs.GetInt("first_boot_done", 0) == 0)
+            {
+                PlayerPrefs.SetInt("first_boot_done", 1); PlayerPrefs.Save();
+                StartRun();
+            }
         }
 
         void SetupCamera()
@@ -292,6 +303,7 @@ namespace Mutagen
                 ui.UpdateMoveBar();
                 ui.UpdateDebug();
                 ui.UpdateCoopEnd();
+                ui.SyncTutorial(state == GameState.Playing && !_paused ? tutorial.Tick(Time.deltaTime) : null, tutorial.HighlightSlot);
             }
         }
 
@@ -300,7 +312,7 @@ namespace Mutagen
             float realDt = Mathf.Min(Time.deltaTime, 0.25f);
             fps = Rng.Lerp(fps, 1f / Mathf.Max(realDt, 1e-4f), 0.1f);
             if (banner.HasValue) { var b = banner.Value; b.life -= realDt; banner = b.life <= 0f ? (Banner?)null : b; }
-            if (state != GameState.Playing || _paused) return;
+            if (state != GameState.Playing || _paused || BalanceRunning) return; // balance batch: the coroutine drives Step exclusively
 
             float scaled = slowmo ? realDt * 0.3f : realDt;
             if (hitstop > 0f) { hitstop = Mathf.Max(0f, hitstop - realDt); scaled = 0f; }
@@ -382,6 +394,7 @@ namespace Mutagen
                     if (p == null || !p.alive) continue;
                     if (p.isBot) { p.Update(dt, this, BotMove(p)); continue; }
                     p.Update(dt, this, _input.MoveVec);
+                    if (_input.MoveVec.sqrMagnitude > 0.01f) tutorial.OnMoved(dt);
                     for (int s = 0; s < 4; s++) if (_moveQueued[s]) { p.UseMove(s, this); _moveQueued[s] = false; }
                     if (_dashQueued) { p.Dash(this); _dashQueued = false; }
                 }
@@ -407,6 +420,7 @@ namespace Mutagen
                 if (o.dead)
                 {
                     if (o.collector != null) o.collector.AddXp(o.value, this);
+                    if (o.collector == player) tutorial.OnOrbCollected();
                     Sfx.Pickup();
                     AddParticle(o.x, o.y, 0f, 40f, .4f, Palette.Dna, 4f);
                 }
@@ -690,11 +704,26 @@ namespace Mutagen
             else mutations.Pick(def, p);
         }
 
-        // A loopback bot resolves its pick immediately (first drafted option), no UI.
+        // A bot resolves its level-up immediately, no UI. Balance isolation runs build around one
+        // target mutation ("" = bite-only baseline takes nothing); otherwise pick a random drafted card
+        // (random > first: samples the whole pool evenly for balance data).
         void BotDraft(Player p)
         {
+            if (_isolationTarget != null)
+            {
+                if (_isolationTarget.Length == 0) return; // baseline: never take anything
+                var target = mutations.ById(_isolationTarget);
+                if (target != null)
+                {
+                    string key = string.IsNullOrEmpty(target.move) ? target.id : target.move;
+                    int s = p.Stacks(key);
+                    bool canStack = (target.repeatable || s == 0) && (target.maxStacks == 0 || s < target.maxStacks);
+                    if (canStack) { ApplyMutation(p, target); return; }
+                }
+                // target maxed (or missing): fall through to a random pick so the run keeps scaling
+            }
             var opts = mutations.Draft(p, 3);
-            if (opts.Count > 0) ApplyMutation(p, opts[0]);
+            if (opts.Count > 0) ApplyMutation(p, opts[Rng.RandI(0, opts.Count - 1)]);
         }
 
         void OpenDraft()
@@ -865,6 +894,7 @@ namespace Mutagen
         public void RunDeterminismCheck(int ticks = 600)
         {
             if (Net.CoopNet.Connected) { Debug.LogWarning("[MUTAGEN] determinism check unavailable during a co-op session"); return; }
+            if (BalanceRunning) { Debug.LogWarning("[MUTAGEN] determinism check unavailable during a balance batch"); return; }
             uint seed = Rng.SeedToInt("determinism-probe");
             ulong a = SimulateHeadless(seed, ticks);
             ulong b = SimulateHeadless(seed, ticks);
@@ -888,6 +918,131 @@ namespace Mutagen
             ulong h = Checksum();
             god = prevGod; autocast = prevAuto; coop = prevCoop;
             return h;
+        }
+
+        // ---------------------------------------------------------------- balance lab
+        // Mass bot simulation for data-driven balancing: hundreds of full headless runs, aggregated
+        // into with-vs-without ("sampling") and forced-build ("isolation") reports. See Core/BalanceSim.cs
+        // for the statistics; this region only drives the sim. Runs as a frame-budgeted coroutine so the
+        // editor AND devices stay responsive; progress + results show in the debug Balance panel.
+        string _isolationTarget;     // null = normal/sampling · "" = bite-only baseline · else mutation id to build
+        Coroutine _balanceCo;
+        public bool BalanceRunning => _balanceCo != null;
+
+        const int SamplingRuns = 200;             // random-draft bot runs
+        const int IsolationRunsPerMutation = 15;  // forced-build runs per mutation (+ baseline set)
+        const int BalanceTickCap = 30000;         // ~8 game-minutes per run, in case a build never dies
+
+        bool _bGod, _bAuto, _bEndless, _bCoop, _bSfx, _bHaptics; float _bParticles;
+
+        public void StartBalanceSim()
+        {
+            if (!DevMode.Enabled) return; // dev tool — gated behind the developer-mode secret call
+            if (BalanceRunning || state != GameState.Menu || Net.CoopNet.Connected)
+            {
+                Debug.LogWarning("[MUTAGEN][balance] can only start from the main menu (and not in a co-op session)");
+                return;
+            }
+            _balanceCo = StartCoroutine(RunBalanceSim());
+        }
+
+        public void StopBalanceSim()
+        {
+            if (!BalanceRunning) return;
+            StopCoroutine(_balanceCo); _balanceCo = null;
+            EndBalanceBatch();
+            ui.SetBalanceStatus("Stopped — partial data discarded");
+        }
+
+        void BeginBalanceBatch()
+        {
+            _bGod = god; _bAuto = autocast; _bEndless = endless; _bCoop = coop;
+            _bSfx = Sfx.Enabled; _bHaptics = Haptics.Enabled; _bParticles = ParticleScale;
+            headless = true; Vfx.Muted = true;
+            Sfx.Enabled = false; Haptics.Enabled = false; ParticleScale = 0f;
+            coop = false; endless = true; autocast = false;
+        }
+
+        void EndBalanceBatch()
+        {
+            headless = false; Vfx.Muted = false;
+            Sfx.Enabled = _bSfx; Haptics.Enabled = _bHaptics; ParticleScale = _bParticles;
+            god = _bGod; autocast = _bAuto; endless = _bEndless; coop = _bCoop;
+            _isolationTarget = null;
+            GotoMenu();
+        }
+
+        IEnumerator RunBalanceSim()
+        {
+            BeginBalanceBatch();
+            var runs = new List<BalanceRunRecord>();
+            var sw = new System.Diagnostics.Stopwatch();
+            uint baseSeed = Rng.SeedToInt("balance-lab");
+
+            var targets = new List<string> { "" };                       // "" = bite-only baseline
+            foreach (var d in mutations.defs) targets.Add(d.id);
+            int total = SamplingRuns + targets.Count * IsolationRunsPerMutation, done = 0;
+
+            for (int i = 0; i < SamplingRuns; i++)
+            {
+                yield return RunOneBalanceRun(baseSeed + (uint)i, null, runs, sw);
+                done++;
+                ui.SetBalanceStatus($"Sampling · run {done}/{total} · last: wave {wave}");
+            }
+            for (int t = 0; t < targets.Count; t++)
+                for (int i = 0; i < IsolationRunsPerMutation; i++)
+                {
+                    yield return RunOneBalanceRun(baseSeed + 100000u + (uint)(t * IsolationRunsPerMutation + i), targets[t], runs, sw);
+                    done++;
+                    ui.SetBalanceStatus($"Isolation · {(targets[t].Length == 0 ? "baseline" : targets[t])} · run {done}/{total}");
+                }
+
+            var sampling = BalanceSim.BuildSamplingReport(runs, mutations.defs, out string csvS);
+            var isolation = BalanceSim.BuildIsolationReport(runs, mutations.defs, out string csvI);
+            BalanceSim.WriteCsv("balance_sampling.csv", csvS);
+            BalanceSim.WriteCsv("balance_isolation.csv", csvI);
+            BalanceSim.WriteCsv("balance_runs_raw.csv", BalanceSim.RawCsv(runs));
+            Debug.Log(BalanceSim.ConsoleSummary(sampling, isolation));
+
+            _balanceCo = null;
+            EndBalanceBatch();
+#if UNITY_IOS
+            string csvWhere = "Files app → On My iPhone → Morphage";
+#elif UNITY_ANDROID
+            string csvWhere = "Android/data folder (any file manager or USB)";
+#else
+            string csvWhere = Application.persistentDataPath;
+#endif
+            ui.SetBalanceStatus($"Done · {runs.Count} runs · CSVs: {csvWhere}");
+            ui.RenderBalanceReport(sampling, isolation);
+        }
+
+        // One full bot run, stepping the sim directly with a ~12ms/frame budget.
+        IEnumerator RunOneBalanceRun(uint seed, string isolationTarget, List<BalanceRunRecord> outRuns, System.Diagnostics.Stopwatch sw)
+        {
+            Rng.Set(seed);
+            Reset();
+            _isolationTarget = isolationTarget;
+            players[0].isBot = true;   // the bot from the co-op loopback plays the run
+            state = GameState.Playing;
+            int tick = 0;
+            sw.Restart();
+            while (state == GameState.Playing && tick < BalanceTickCap)
+            {
+                Step(FIXED);
+                tick++;
+                if (sw.ElapsedMilliseconds >= 12) { yield return null; sw.Restart(); }
+            }
+            var p0 = players[0];
+            outRuns.Add(new BalanceRunRecord
+            {
+                seed = seed, isolationTarget = isolationTarget,
+                wave = wave, ticks = tick, level = p0?.level ?? 0, kills = stats.kills,
+                damageDealt = stats.damageDealt, damageTaken = stats.damageTaken, time = stats.time,
+                reached15 = wave >= 15,
+                mutations = p0 != null ? new Dictionary<string, int>(p0.mutations) : new Dictionary<string, int>(),
+            });
+            _isolationTarget = null;
         }
 
         // ---------------------------------------------------------------- run lifecycle
@@ -919,7 +1074,9 @@ namespace Mutagen
         public void GameOver()
         {
             if (state == GameState.Dead || state == GameState.Won) return;
-            state = GameState.Dead; Sfx.Over();
+            state = GameState.Dead;
+            if (headless) return; // balance batch: outcome is recorded by the harness — no UI/audio/archive
+            Sfx.Over();
             CaptureMonster(false);
             ui.ShowEnd(false);
         }
@@ -927,7 +1084,9 @@ namespace Mutagen
         public void Win()
         {
             if (state == GameState.Dead || state == GameState.Won) return;
-            state = GameState.Won; Sfx.Win();
+            state = GameState.Won;
+            if (headless) return; // balance batch (unreachable in endless, but belt-and-braces)
+            Sfx.Win();
             SetBanner("VICTORY", null, Palette.Dna, 3f);
             CaptureMonster(true);
             ui.ShowEnd(true);
@@ -1005,9 +1164,33 @@ namespace Mutagen
             ui.HideStart(); ui.HideEnd(); ui.HidePause();
             SetBanner(endless ? "ENDLESS" : "WAVE 1", null, Palette.Dna, 1.6f);
             state = GameState.Playing;
+            tutorial.BeginIfFirstRun(TouchInput.IsTouchDevice); // no-op after the first-ever run
         }
 
         public void ReplaySeed() => StartRun(seedText);
+
+        // ---- rematch (mutual ready-check: EITHER player can offer; starts when both have tapped) ----
+        bool _rematchReadyLocal, _rematchReadyRemote;
+        public bool RematchWaiting => _rematchReadyLocal;   // we tapped, partner hasn't
+        public bool RematchOffered => _rematchReadyRemote;  // partner tapped, we haven't
+
+        // The local player tapped Rematch on the result screen.
+        public void RematchClicked()
+        {
+            if (!coop || !Net.CoopNet.Connected || state == GameState.Playing || _rematchReadyLocal) return;
+            _rematchReadyLocal = true;
+            Net.CoopSync.SendRematchReady();
+            TryStartRematch();
+        }
+
+        public void OnRemoteRematchReady() { _rematchReadyRemote = true; TryStartRematch(); }
+
+        // Both players are ready → the HOST generates the seed and pulls both in (single seed source, no race).
+        void TryStartRematch()
+        {
+            if (!_rematchReadyLocal || !_rematchReadyRemote) return;
+            RequestRematch();
+        }
 
         // Host starts a fresh co-op match on a new seed; the partner is pulled in over the rematch channel.
         public void RequestRematch()
@@ -1029,11 +1212,13 @@ namespace Mutagen
             // Prime the input pipeline: the first InputDelay ticks run neutral input on both sides, so
             // real input flows with a fixed delay and both sims stay tick-for-tick identical.
             _execTick = 0; _stallFrames = 0; _pendingDraftByte = 0; _nextCompareTick = 0; _desynced = false;
+            _rematchReadyLocal = _rematchReadyRemote = false;
             _localBuf.Clear(); _localChecksums.Clear(); Net.CoopSync.ResetBuffer();
             for (int t = 0; t < InputDelay; t++) SampleAndSend(t, Vector2.zero, false, false, false, false, false);
             ui.HideStart(); ui.HideEnd(); ui.HidePause(); ui.HideDesyncInfo();
             SetBanner("CO-OP · WAVE 1", null, Palette.Dna, 1.8f);
             state = GameState.Playing;
+            tutorial.Stop(); // never during a match — a frozen reader would stall the partner
         }
 
         // Buffer a local input for a tick and broadcast a redundant window of recent inputs.
@@ -1146,7 +1331,7 @@ namespace Mutagen
             pendingLevels = 0; god = false; slowmo = false; _accum = 0f; _dashQueued = false;
             for (int i = 0; i < 4; i++) _moveQueued[i] = false;
             _pendingReplace = null;
-            ui.RefreshGodBtn(); ui.RenderMuts();
+            if (!headless) { ui.RefreshGodBtn(); ui.RenderMuts(); } // skip UI churn during mass batches
         }
 
         // ---------------------------------------------------------------- spawn helpers (allocate + pool)
@@ -1260,6 +1445,7 @@ namespace Mutagen
         void Render()
         {
             // Camera is static (set in SetupCamera); Feel's MMCameraShaker owns all camera shake.
+            if (BalanceRunning) return; // balance batch: don't allocate views for thousands of headless entities
             if (state == GameState.Menu) { for (int i = 0; i < 2; i++) _playerVisuals[i].Sync(null, false); return; }
 
             // hazard zones (soft translucent pools, drawn under everything else)
@@ -1322,8 +1508,15 @@ namespace Mutagen
         void EnsureBeam(Beam b) { if (b.view == null) b.view = _beamPool.Get(); }
 
         // ---------------------------------------------------------------- misc / debug
-        public void Shake(float a) { if (GameSettings.ScreenShake && _juice != null) _juice.Shake(a); }
-        public void ToggleDebug() { debug = !debug; ui.SetDebugVisible(debug); }
+        public void Shake(float a) { if (!headless && GameSettings.ScreenShake && _juice != null) _juice.Shake(a); }
+        public void ToggleDebug()
+        {
+            if (!DevMode.Enabled) return; // devices: requires the developer-mode secret call
+            debug = !debug; ui.SetDebugVisible(debug);
+        }
+
+        /// <summary>Force the debug panel closed (used when developer mode is disarmed).</summary>
+        public void HideDebugPanel() { debug = false; ui.SetDebugVisible(false); }
 
         // Sim-mutating debug actions change only THIS machine's game — in a connected co-op match that is
         // a guaranteed desync, so they're locked out while connected.
