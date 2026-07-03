@@ -18,6 +18,7 @@ namespace Mutagen
         VisualElement _hud, _debug, _startOverlay, _levelOverlay, _deathOverlay;
         VisualElement _codexOverlay, _codexList;
         VisualElement _galleryOverlay, _galleryList, _gameModeOverlay;
+        VisualElement _shopOverlay, _shopList; Label _shopEssence, _menuEssence;
         Label _galleryEmpty;
         readonly System.Collections.Generic.List<RenderTexture> _portraits = new();
         Button _hapticsToggle, _shakeToggle, _clearDataBtn, _perfToggle, _handToggle;
@@ -163,6 +164,7 @@ namespace Mutagen
             _settingsOverlay = Q("settingsOverlay"); _bindList = Q("bindList");
             _codexOverlay = Q("codexOverlay"); _codexList = Q("codexList");
             _galleryOverlay = Q("galleryOverlay"); _galleryList = Q("galleryList"); _galleryEmpty = L("galleryEmpty");
+            _shopOverlay = Q("shopOverlay"); _shopList = Q("shopList"); _shopEssence = L("shopEssence"); _menuEssence = L("menuEssence");
             _gameModeOverlay = Q("gameModeOverlay");
             _volMaster = _root.Q<Slider>("volMaster"); _volMusic = _root.Q<Slider>("volMusic"); _volSfx = _root.Q<Slider>("volSfx");
             _seedField = _root.Q<TextField>("seedField");
@@ -218,6 +220,10 @@ namespace Mutagen
             if (codexDone != null) codexDone.clicked += HideCodex;
             var galleryBtn = _root.Q<Button>("galleryBtn");
             if (galleryBtn != null) galleryBtn.clicked += ShowGallery;
+            var shopBtn = _root.Q<Button>("shopBtn");
+            if (shopBtn != null) shopBtn.clicked += ShowShop;
+            var shopDone = _root.Q<Button>("shopDone");
+            if (shopDone != null) shopDone.clicked += HideShop;
             // Touch-friendly way into the debug panel (phones have no Tab key): triple-tap the title.
             var menuTitle = _root.Q<Label>("menuTitle");
             if (menuTitle != null)
@@ -279,6 +285,7 @@ namespace Mutagen
             Hide(_settingsOverlay);
             Hide(_codexOverlay);
             Hide(_galleryOverlay);
+            Hide(_shopOverlay);
             Hide(_gameModeOverlay);
             Hide(_matchOverlay);
             Hide(_balanceOverlay);
@@ -321,11 +328,11 @@ namespace Mutagen
             };
 
             // Make every full-screen panel scroll when its content is taller than the safe area.
-            foreach (var ov in new[] { _startOverlay, _settingsOverlay, _codexOverlay, _galleryOverlay, _gameModeOverlay, _balanceOverlay, _levelOverlay, _deathOverlay, _replaceOverlay, _pauseOverlay })
+            foreach (var ov in new[] { _startOverlay, _settingsOverlay, _codexOverlay, _galleryOverlay, _gameModeOverlay, _balanceOverlay, _shopOverlay, _levelOverlay, _deathOverlay, _replaceOverlay, _pauseOverlay })
                 WrapInScroll(ov);
 
             Hide(_levelOverlay); Hide(_deathOverlay); Hide(_debug);
-            Show(_startOverlay);
+            Show(_startOverlay); RefreshEssence();
             _autocast = PlayerPrefs.GetInt("opt_autocast", 0) == 1;
             SyncSettingsUI();
 
@@ -1189,6 +1196,55 @@ namespace Mutagen
             }
         }
 
+        // ---------------------------------------------------------------- unlock shop
+        public void ShowShop() { RenderShop(); Show(_shopOverlay); _shopOverlay?.BringToFront(); }
+        public void HideShop() { Hide(_shopOverlay); RefreshEssence(); }
+
+        // Refresh the Essence readout on both the shop and the main menu.
+        void RefreshEssence()
+        {
+            string s = "◇ " + MetaProgress.Essence + " Essence";
+            if (_shopEssence != null) _shopEssence.text = s;
+            if (_menuEssence != null) _menuEssence.text = s;
+        }
+
+        // One row per lockable (rare/legendary) move & modifier: name, rarity/kind, and Owned or a Buy button.
+        void RenderShop()
+        {
+            if (_shopList == null) return;
+            _shopList.Clear();
+            RefreshEssence();
+            if (_game?.mutations == null) return;
+            foreach (var d in _game.mutations.defs)
+            {
+                if (MetaProgress.IsFree(d.rarity)) continue; // commons are always in the pool — nothing to buy
+                var row = new VisualElement(); row.AddToClassList("codexrow");
+                bool owned = MetaProgress.IsUnlocked(d);
+                if (owned) row.AddToClassList("active");
+
+                var head = new VisualElement(); head.AddToClassList("codexhead"); row.Add(head);
+                var name = new Label(d.displayName); name.AddToClassList("synname"); head.Add(name);
+                string kind = string.IsNullOrEmpty(d.move) ? "Modifier" : "Move";
+                var cat = new Label(d.rarity + " · " + kind); cat.AddToClassList("syncat"); head.Add(cat);
+
+                var desc = new Label(d.description); desc.AddToClassList("syneffect"); row.Add(desc);
+
+                if (owned)
+                {
+                    var tag = new Label("✓ Unlocked"); tag.AddToClassList("synrecipe"); row.Add(tag);
+                }
+                else
+                {
+                    int cost = MetaProgress.CostOf(d);
+                    var buy = new Button { text = "Unlock  ◇ " + cost }; buy.AddToClassList("btn");
+                    if (MetaProgress.Essence < cost) buy.SetEnabled(false);
+                    buy.clicked += () => { if (MetaProgress.Buy(d)) RenderShop(); }; // re-render: updates balance + owned state
+                    row.Add(buy);
+                }
+                _shopList.Add(row);
+            }
+        }
+
         // ---------------------------------------------------------------- monster archive
         public void ShowGallery() { RenderGallery(); Show(_galleryOverlay); _galleryOverlay?.BringToFront(); }
         public void HideGallery() { Hide(_galleryOverlay); ReleasePortraits(); }
@@ -1281,8 +1337,9 @@ namespace Mutagen
         public void ShowDesyncInfo(string text) { if (_desyncInfo != null) { _desyncInfo.text = text; Show(_desyncInfo); } }
         public void HideDesyncInfo() => Hide(_desyncInfo);
 
-        public void ShowStart() => Show(_startOverlay);
+        public void ShowStart() { RefreshEssence(); Show(_startOverlay); }
         public void HideStart() { Hide(_startOverlay); Hide(_gameModeOverlay); Hide(_matchOverlay); } // a match may auto-start from the panel or the waiting popup
+        public void HideBalance() => Hide(_balanceOverlay);
 
         // ---------------------------------------------------------------- debug / misc
         public void SetDebugVisible(bool v) { if (v) Show(_debug); else Hide(_debug); }

@@ -906,7 +906,9 @@ namespace Mutagen
         {
             Rng.Set(seed);
             bool prevGod = god, prevAuto = autocast, prevCoop = coop;
+            bool prevEnforce = MetaProgress.Enforce;
             coop = false;                 // the gate always tests the shipping single-player sim
+            MetaProgress.Enforce = false; // full draft pool → checksum independent of this device's unlocks
             Reset();
             god = true; autocast = false; state = GameState.Playing;
             for (int i = 0; i < ticks; i++)
@@ -916,7 +918,7 @@ namespace Mutagen
                 Step(FIXED);
             }
             ulong h = Checksum();
-            god = prevGod; autocast = prevAuto; coop = prevCoop;
+            god = prevGod; autocast = prevAuto; coop = prevCoop; MetaProgress.Enforce = prevEnforce;
             return h;
         }
 
@@ -933,7 +935,7 @@ namespace Mutagen
         const int IsolationRunsPerMutation = 15;  // forced-build runs per mutation (+ baseline set)
         const int BalanceTickCap = 30000;         // ~8 game-minutes per run, in case a build never dies
 
-        bool _bGod, _bAuto, _bEndless, _bCoop, _bSfx, _bHaptics; float _bParticles;
+        bool _bGod, _bAuto, _bEndless, _bCoop, _bSfx, _bHaptics, _bEnforce; float _bParticles;
 
         public void StartBalanceSim()
         {
@@ -956,18 +958,19 @@ namespace Mutagen
 
         void BeginBalanceBatch()
         {
-            _bGod = god; _bAuto = autocast; _bEndless = endless; _bCoop = coop;
+            _bGod = god; _bAuto = autocast; _bEndless = endless; _bCoop = coop; _bEnforce = MetaProgress.Enforce;
             _bSfx = Sfx.Enabled; _bHaptics = Haptics.Enabled; _bParticles = ParticleScale;
             headless = true; Vfx.Muted = true;
             Sfx.Enabled = false; Haptics.Enabled = false; ParticleScale = 0f;
             coop = false; endless = true; autocast = false;
+            MetaProgress.Enforce = false; // full draft pool → balance data independent of this device's unlocks
         }
 
         void EndBalanceBatch()
         {
             headless = false; Vfx.Muted = false;
             Sfx.Enabled = _bSfx; Haptics.Enabled = _bHaptics; ParticleScale = _bParticles;
-            god = _bGod; autocast = _bAuto; endless = _bEndless; coop = _bCoop;
+            god = _bGod; autocast = _bAuto; endless = _bEndless; coop = _bCoop; MetaProgress.Enforce = _bEnforce;
             _isolationTarget = null;
             GotoMenu();
         }
@@ -1117,6 +1120,7 @@ namespace Mutagen
             rec.evolved = new List<string>(p.evolved).ToArray();
             rec.name = MonsterNameFor(p);
             SaveSystem.AddMonster(rec);
+            MetaProgress.AwardRun(stats.dnaCollected); // bank Essence from this run's DNA (solo + co-op; headless returns before here)
         }
 
         // Flavour name from the creature's most defining mutations.
@@ -1150,6 +1154,7 @@ namespace Mutagen
             // Solo entry point — clear any leftover co-op identity from an abandoned host/join/search.
             // (Stale localIndex=1 would leave the run heroless; stale coop=true would spawn a ghost bot.)
             coop = false; localIndex = 0;
+            MetaProgress.Enforce = true; // solo: honor shop unlocks (co-op/headless set this false for determinism)
             if (seed == null)
             {
                 string v = ui.GetSeedField().Trim();
@@ -1161,7 +1166,7 @@ namespace Mutagen
             endless = ui.GetEndless();
             autocast = ui.GetAutocast();
             Reset();
-            ui.HideStart(); ui.HideEnd(); ui.HidePause();
+            ui.HideStart(); ui.HideEnd(); ui.HidePause(); ui.HideBalance(); ui.HideShop();
             SetBanner(endless ? "ENDLESS" : "WAVE 1", null, Palette.Dna, 1.6f);
             state = GameState.Playing;
             tutorial.BeginIfFirstRun(TouchInput.IsTouchDevice); // no-op after the first-ever run
@@ -1206,6 +1211,7 @@ namespace Mutagen
         public void StartCoopRun()
         {
             coop = true;
+            MetaProgress.Enforce = false; // co-op: full draft pool on both peers → deterministic (unlocks may differ per device)
             endless = true; // co-op is last-one-standing survival — no campaign win, and identical rules on both peers
             Rng.Set(Rng.SeedToInt(seedText));
             Reset();

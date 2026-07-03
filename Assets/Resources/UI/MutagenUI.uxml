@@ -176,6 +176,15 @@
             <ui:Button name="balanceDone" text="Stop" class="btn"/>
         </ui:VisualElement>
 
+        <!-- ===== Unlock shop (spend Essence banked from runs) ===== -->
+        <ui:VisualElement name="shopOverlay" class="overlay">
+            <ui:Label class="eyebrow" text="Gene Lab"/>
+            <ui:Label class="big" text="Unlock Shop"/>
+            <ui:Label name="shopEssence" class="sub" text="◇ 0 Essence"/>
+            <ui:VisualElement name="shopList" class="codexlist"/>
+            <ui:Button name="shopDone" text="Done" class="btn"/>
+        </ui:VisualElement>
+
         <!-- ===== Quick-match waiting popup ===== -->
         <ui:VisualElement name="matchOverlay" class="overlay">
             <ui:Label class="eyebrow" text="Quick Match"/>
@@ -193,7 +202,9 @@
                     <ui:Button name="settingsBtn" text="Settings" class="toggle"/>
                     <ui:Button name="codexBtn" text="Synergies" class="toggle"/>
                     <ui:Button name="galleryBtn" text="Monsters" class="toggle"/>
+                    <ui:Button name="shopBtn" text="Shop" class="toggle"/>
                 </ui:VisualElement>
+                <ui:Label name="menuEssence" class="sub" text="◇ 0 Essence"/>
                 <ui:Label class="ver" text="PROTOTYPE v0.2 · port"/>
             </ui:VisualElement>
         </ui:VisualElement>

@@ -48,6 +48,29 @@ namespace Mutagen
         /// <summary>Wipe the whole monster archive.</summary>
         public static void ClearMonsters() => SaveMonsters(new MonsterCollection());
 
+        // ---- meta-progression (currency + unlocks) ----
+        static string MetaPath => Path.Combine(Application.persistentDataPath, "morphage_meta.json");
+
+        public static MetaSave LoadMeta()
+        {
+            try
+            {
+                if (File.Exists(MetaPath))
+                {
+                    var m = JsonUtility.FromJson<MetaSave>(File.ReadAllText(MetaPath));
+                    if (m != null) { m.unlocked ??= new System.Collections.Generic.List<string>(); return m; }
+                }
+            }
+            catch (System.Exception e) { Debug.LogWarning($"[MUTAGEN] Load meta failed: {e.Message}"); }
+            return new MetaSave();
+        }
+
+        public static void SaveMeta(MetaSave m)
+        {
+            try { File.WriteAllText(MetaPath, JsonUtility.ToJson(m)); }
+            catch (System.Exception e) { Debug.LogWarning($"[MUTAGEN] Save meta failed: {e.Message}"); }
+        }
+
         // ---- co-op record (per device) ----
         public static int CoopWins => PlayerPrefs.GetInt("coop_wins", 0);
         public static int CoopLosses => PlayerPrefs.GetInt("coop_losses", 0);

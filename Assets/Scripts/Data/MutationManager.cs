@@ -23,6 +23,7 @@ namespace Mutagen
             var outp = new List<MutationDef>();
             foreach (var d in defs)
             {
+                if (MetaProgress.Enforce && !MetaProgress.IsUnlocked(d)) continue; // meta-locked (solo only)
                 int s = player.Stacks(d.id);
                 if (!d.repeatable && s > 0) continue;
                 if (d.maxStacks != 0 && s >= d.maxStacks) continue;
