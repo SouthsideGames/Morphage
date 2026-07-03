@@ -9,10 +9,12 @@ namespace Mutagen
     /// </summary>
     public static class DevMode
     {
-        public const string Code = "southside-dev"; // the secret call — change to anything you like
+        public const string Code = "BellaLove"; // the secret call — change to anything you like (matched case-insensitively)
         const string Key = "dev_mode";
 
-        public static bool Enabled => Application.isEditor || PlayerPrefs.GetInt(Key, 0) == 1;
+        // Gated everywhere (editor included) behind the secret call so the editor matches devices.
+        // The flag persists in PlayerPrefs, so you only type the code once per install.
+        public static bool Enabled => PlayerPrefs.GetInt(Key, 0) == 1;
 
         /// <summary>Flip the device flag. Returns the new state.</summary>
         public static bool Toggle()

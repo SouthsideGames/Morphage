@@ -104,7 +104,8 @@ namespace Mutagen
                 return n == 0 ? (0, 0f, 0f, 0f, 0f) : (n, w / n, t / n, d / n, k / n);
             }
 
-            var baseline = groups.TryGetValue("", out var bl) ? Stats(bl) : (0, 0f, 0f, 0f, 0f);
+            (int n, float wave, float secs, float dps, float kills) baseline =
+                groups.TryGetValue("", out var bl) ? Stats(bl) : (0, 0f, 0f, 0f, 0f);
             string NameOf(string id)
             {
                 foreach (var d in defs) if (d.id == id) return d.displayName;

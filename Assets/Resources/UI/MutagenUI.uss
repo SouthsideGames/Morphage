@@ -137,7 +137,8 @@
 .ver { font-size: 10px; letter-spacing: 3px; color: var(--muted); opacity: 0.5; margin-top: 10px; }
 
 /* ---------- debug ---------- */
-.debug { position: absolute; right: 10px; top: 64px; width: 210px; background-color: var(--panel); border-width: 1px; border-color: var(--line); border-radius: 10px; padding: 10px; }
+.debug { position: absolute; right: 10px; top: 64px; width: 210px; max-height: 80%; background-color: var(--panel); border-width: 1px; border-color: var(--line); border-radius: 10px; padding: 10px; }
+.dbgscroll { flex-grow: 1; flex-shrink: 1; }
 .dbgtitle { font-size: 9px; letter-spacing: 2px; color: var(--mut); -unity-font-style: bold; margin-bottom: 6px; }
 .dbginfo { font-size: 10px; color: rgb(158,201,189); white-space: normal; margin-bottom: 6px; }
 .dbggrid { flex-direction: row; flex-wrap: wrap; }

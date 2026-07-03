@@ -38,6 +38,7 @@
         <ui:VisualElement name="debug" class="debug">
             <ui:Label class="dbgtitle" name="dbgTitle" text="Debug · seed —"/>
             <ui:Label name="dbgInfo" class="dbginfo"/>
+            <ui:ScrollView name="dbgScroll" class="dbgscroll" mode="Vertical" vertical-scroller-visibility="Auto" horizontal-scroller-visibility="Hidden">
             <ui:VisualElement class="dbggrid">
                 <ui:Button name="dbgGod" text="God: off"/>
                 <ui:Button name="dbgLvl" text="+1 Level"/>
@@ -56,6 +57,7 @@
                 <ui:Button name="dbgCoop" text="Co-op: off"/>
                 <ui:Button name="dbgBalance" text="Balance"/>
             </ui:VisualElement>
+            </ui:ScrollView>
         </ui:VisualElement>
 
         <!-- ===== Level-up draft ===== -->

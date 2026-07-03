@@ -1515,6 +1515,9 @@ namespace Mutagen
             debug = !debug; ui.SetDebugVisible(debug);
         }
 
+        /// <summary>Force the debug panel closed (used when developer mode is disarmed).</summary>
+        public void HideDebugPanel() { debug = false; ui.SetDebugVisible(false); }
+
         // Sim-mutating debug actions change only THIS machine's game — in a connected co-op match that is
         // a guaranteed desync, so they're locked out while connected.
         bool DebugLockedInCoop()

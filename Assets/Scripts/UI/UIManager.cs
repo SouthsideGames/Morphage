@@ -23,7 +23,7 @@ namespace Mutagen
         Button _hapticsToggle, _shakeToggle, _clearDataBtn, _perfToggle, _handToggle;
         int _titleTaps;
         VisualElement _hpFill, _xpFill, _muts, _cards;
-        Label _hpTxt, _xpTxt, _lvlVal, _waveVal, _dnaVal, _partnerHp, _desyncInfo;
+        Label _hpTxt, _xpTxt, _lvlVal, _waveVal, _dnaVal, _partnerHp, _desyncInfo, _devIndicator;
         // Co-op menu controls (bound from the coop overlay in UXML)
         Button _hostBtn, _joinBtn, _quickBtn; TextField _codeField; Label _netStatus;
         VisualElement _matchOverlay; Label _matchStatus; string _matchBase; int _matchDots;
@@ -357,6 +357,26 @@ namespace Mutagen
             _tutLabel.AddToClassList("tutlabel");
             _tutLabel.style.display = DisplayStyle.None;
             _hud?.Add(_tutLabel);
+
+            // Persistent developer-mode indicator: small text pinned top-left, on top of the menu.
+            // Stays visible for as long as dev mode is armed (added last so it renders above overlays).
+            _devIndicator = new Label("DEVELOPER MODE");
+            _devIndicator.style.position = Position.Absolute;
+            _devIndicator.style.top = 6f;
+            _devIndicator.style.left = 8f;
+            _devIndicator.style.fontSize = 9f;
+            _devIndicator.style.letterSpacing = 2f;
+            _devIndicator.style.unityFontStyleAndWeight = FontStyle.Bold;
+            _devIndicator.style.color = Palette.Dna;
+            _root.Add(_devIndicator);
+            RefreshDevIndicator();
+        }
+
+        /// <summary>Reflect the current dev-mode state in the always-on top-left indicator.</summary>
+        public void RefreshDevIndicator()
+        {
+            if (_devIndicator != null)
+                _devIndicator.style.display = DevMode.Enabled ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         /// <summary>Show/hide the onboarding prompt and pulse the relevant move-bar slot (-1 = none).</summary>
@@ -386,11 +406,12 @@ namespace Mutagen
         {
             // The seed field doubles as the developer-mode "special call": typing the secret code
             // toggles the dev tools (debug panel + Balance Lab) on this device instead of seeding a run.
-            if (_seedField != null && (_seedField.value ?? "").Trim().ToLowerInvariant() == DevMode.Code)
+            if (_seedField != null && string.Equals((_seedField.value ?? "").Trim(), DevMode.Code, System.StringComparison.OrdinalIgnoreCase))
             {
                 _seedField.value = "";
                 bool on = DevMode.Toggle();
-                _game.SetBanner(on ? "DEVELOPER MODE ON" : "DEVELOPER MODE OFF", null, Palette.Dna, 2.2f);
+                if (!on) _game.HideDebugPanel(); // disarming also closes the debug panel
+                RefreshDevIndicator(); // the persistent top-left indicator is the on/off feedback
             }
             if (!Net.CoopNet.Connected)
             {
