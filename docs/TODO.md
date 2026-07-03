@@ -12,6 +12,10 @@ Snapshot of where the project stands and what's left. Companion to [MULTIPLAYER.
 - **UI polish** — menu split into Game Mode + Settings panels, Oxanium font (loaded in code from `Resources/Fonts/Oxanium.ttf`), ~1.28× larger UI (panel ref 800×450), squarer buttons, seed-text color fix, decorative icons + subtitle removed.
 - **AssetGenerator** paths fixed to target the live `Assets/Resources/{Mutations,Enemies,UI}` (was the dead `Assets/MUTAGEN/` tree).
 - **Debug access** — `Tab` key (keyboard) or **triple-tap the MORPHAGE title** (touch) opens the debug panel.
+  **Gated behind Developer Mode on devices** (`Core/DevMode.cs`): type the secret code (`DevMode.Code`,
+  currently `southside-dev`) into the Game Mode seed field and press Done → "DEVELOPER MODE ON" (persists;
+  repeat to turn off). Always enabled in the editor. Balance Lab is gated the same way. iOS builds expose
+  the CSV folder in the Files app via `Assets/Editor/IosPostBuild.cs`.
 
 ## 🔜 To do
 
@@ -66,7 +70,20 @@ Snapshot of where the project stands and what's left. Companion to [MULTIPLAYER.
 
 ### B. Finish single-player
 - [ ] Balance/content lock (stop churning mutations/enemies/synergy numbers before co-op multiplies the cost).
-- [ ] Onboarding / tutorial.
+  - **Balance Lab built** (debug panel → Balance, menu only): mass bot simulation → data-driven balance.
+    Sampling (200 random-draft runs, with-vs-without wave lift per mutation) + isolation (15 forced-build
+    runs per mutation vs bite-only baseline). Outputs: 3 CSVs in `persistentDataPath`, console ranked
+    summary, in-game results panel (device-friendly). Counts are consts in Game.cs (`SamplingRuns` etc.).
+    Caveat: bots measure RELATIVE power (no dodging/aim skill) — use for outlier-hunting.
+- [ ] **Enemy AI depth pass (design).** Current enemies mostly beeline at the nearest hero (spitters kite,
+  boss telegraphs). To make fights more interesting: e.g. flanking/surround behavior for chasers, spitters
+  leading their shots, exploders feinting, elites with dodge-sidesteps, pack behaviors. Any change MUST stay
+  on seeded `Rng` + deterministic (lockstep-safe). Related: the Balance Lab bot could learn to dash/kite so
+  its data better approximates human play — improve alongside.
+- [~] Onboarding / tutorial — BUILT, needs device test. First-run contextual prompts (`Core/Tutorial.cs`):
+  move → attack (button pulses) → dash (pulses) → collect DNA → send-off. Solo-only, once per device
+  (`tut_done` PlayerPrefs), purely observational (zero sim impact — determinism/co-op safe). No replay
+  path yet (reinstall resets it); add a "show tutorial" settings toggle if wanted.
 - [ ] **Meta-progression** — persistent currency + between-runs unlock shop. Sets the save schema; do before co-op so it isn't retrofit into 2 players.
 
 ### C. Multiplayer proper (Stages 1–4 in MULTIPLAYER.md)

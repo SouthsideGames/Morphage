@@ -36,6 +36,7 @@ namespace Mutagen.Net
         const string InputMsg = "mtick";
         const string ChkMsg = "mchk";
         const string RematchMsg = "mrst";
+        const string RematchReadyMsg = "mrr";
         bool _registered, _started, _callbacksHooked;
         Game _game;
 
@@ -68,6 +69,7 @@ namespace Mutagen.Net
                 nm.CustomMessagingManager.RegisterNamedMessageHandler(InputMsg, OnInput);
                 nm.CustomMessagingManager.RegisterNamedMessageHandler(ChkMsg, OnChecksum);
                 nm.CustomMessagingManager.RegisterNamedMessageHandler(RematchMsg, OnRematch);
+                nm.CustomMessagingManager.RegisterNamedMessageHandler(RematchReadyMsg, OnRematchReady);
                 _registered = true;
                 Debug.Log("[MUTAGEN][net] channels registered");
             }
@@ -165,6 +167,26 @@ namespace Mutagen.Net
                 if (tick >= _minAcceptTick && !_remoteBuf.ContainsKey(tick))
                     _remoteBuf[tick] = new TickInput { tick = tick, moveX = mx, moveY = my, bits = bits, draft = draft };
             }
+        }
+
+        // ---- rematch ready-check (either player offers; the match starts when both are ready) ----
+        public static void SendRematchReady()
+        {
+            var nm = NetworkManager.Singleton;
+            if (nm == null || !nm.IsListening) return;
+            using var w = new FastBufferWriter(4, Allocator.Temp);
+            w.WriteValueSafe((byte)1);
+            if (nm.IsHost) nm.CustomMessagingManager.SendNamedMessageToAll(RematchReadyMsg, w);
+            else nm.CustomMessagingManager.SendNamedMessage(RematchReadyMsg, NetworkManager.ServerClientId, w);
+        }
+
+        void OnRematchReady(ulong sender, FastBufferReader reader)
+        {
+            var nm = NetworkManager.Singleton;
+            if (nm != null && sender == nm.LocalClientId) return;
+            reader.ReadValueSafe(out byte _);
+            Debug.Log("[MUTAGEN][net] partner is ready for a rematch");
+            EnsureGame()?.OnRemoteRematchReady();
         }
 
         // ---- rematch (host announces a new seed; both peers restart together) ----

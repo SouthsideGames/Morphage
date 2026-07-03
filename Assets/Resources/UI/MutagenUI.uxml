@@ -27,7 +27,7 @@
                 </ui:VisualElement>
             </ui:VisualElement>
             <ui:VisualElement name="muts" class="muts"/>
-            <ui:Button name="pauseBtn" class="pausebtn" text="❚❚"/>
+            <ui:Button name="pauseBtn" class="pausebtn" text=""/>
             <ui:Label name="banner" class="banner"/>
             <ui:VisualElement name="touchLayer" class="touchlayer"/>
             <ui:VisualElement name="joyBase" class="joybase"><ui:VisualElement name="joyKnob" class="joyknob"/></ui:VisualElement>
@@ -54,20 +54,19 @@
                 <ui:Button name="dbgTouch" text="Touch UI"/>
                 <ui:Button name="dbgDeterm" text="V"/>
                 <ui:Button name="dbgCoop" text="Co-op: off"/>
+                <ui:Button name="dbgBalance" text="Balance"/>
             </ui:VisualElement>
         </ui:VisualElement>
 
         <!-- ===== Level-up draft ===== -->
         <ui:VisualElement name="levelOverlay" class="overlay">
-            <ui:Label class="eyebrow" text="Mutation Draft"/>
             <ui:Label class="big" text="Evolve"/>
             <ui:VisualElement name="cards" class="cards"/>
-            <ui:Button name="rerollBtn" class="btn ghost reroll" text="↻ Reroll (3)"/>
+            <ui:Button name="rerollBtn" class="btn ghost reroll" text="Reroll (3)"/>
         </ui:VisualElement>
 
         <!-- ===== Death ===== -->
         <ui:VisualElement name="deathOverlay" class="overlay">
-            <ui:Label name="endEyebrow" class="eyebrow" text="Specimen Terminated"/>
             <ui:Label name="endBig" class="big" text="You Died"/>
             <ui:VisualElement class="deathstats">
                 <ui:VisualElement class="dstat"><ui:Label name="dWave" text="0" class="dval"/><ui:Label text="Waves" class="dkey"/></ui:VisualElement>
@@ -80,7 +79,7 @@
             <ui:Label name="dMuts" class="sub"/>
             <ui:Label name="dSeed" class="seedline" text="seed —"/>
             <ui:VisualElement class="btnrow">
-                <ui:Button name="replayBtn" text="Replay Seed ▸" class="btn"/>
+                <ui:Button name="replayBtn" text="Replay Seed" class="btn"/>
                 <ui:Button name="menuBtn" text="Main Menu" class="btn ghost"/>
             </ui:VisualElement>
         </ui:VisualElement>
@@ -98,7 +97,7 @@
             <ui:Label class="eyebrow" text="Specimen Suspended"/>
             <ui:Label class="big" text="Paused"/>
             <ui:VisualElement class="btnrow">
-                <ui:Button name="resumeBtn" text="Resume ▸" class="btn"/>
+                <ui:Button name="resumeBtn" text="Resume" class="btn"/>
                 <ui:Button name="pauseCodexBtn" text="Synergies" class="btn ghost"/>
                 <ui:Button name="pauseMenuBtn" text="Main Menu" class="btn ghost"/>
             </ui:VisualElement>
@@ -154,7 +153,7 @@
                     <ui:Button name="modeToggle" text="Campaign · 15 waves" class="toggle"/>
                 </ui:VisualElement>
                 <ui:Label class="slabel" text="Online co-op"/>
-                <ui:Button name="quickBtn" text="Quick Match ▸" class="btn"/>
+                <ui:Button name="quickBtn" text="Quick Match" class="btn"/>
                 <ui:Button name="hostBtn" text="Host Game" class="btn ghost"/>
                 <ui:Label class="slabel" text="Join code"/>
                 <ui:TextField name="coopCodeField" class="seedinput"/>
@@ -167,11 +166,26 @@
             </ui:VisualElement>
         </ui:VisualElement>
 
+        <!-- ===== Balance lab (debug tool) ===== -->
+        <ui:VisualElement name="balanceOverlay" class="overlay">
+            <ui:Label class="big" text="Balance Lab"/>
+            <ui:Label name="balanceStatus" class="sub" text=""/>
+            <ui:VisualElement name="balanceList" class="codexlist"/>
+            <ui:Button name="balanceDone" text="Stop" class="btn"/>
+        </ui:VisualElement>
+
+        <!-- ===== Quick-match waiting popup ===== -->
+        <ui:VisualElement name="matchOverlay" class="overlay">
+            <ui:Label class="eyebrow" text="Quick Match"/>
+            <ui:Label name="matchStatus" class="big" text="Searching"/>
+            <ui:Button name="matchCancel" text="Cancel" class="btn ghost"/>
+        </ui:VisualElement>
+
         <!-- ===== Main menu ===== -->
         <ui:VisualElement name="startOverlay" class="overlay">
             <ui:Label name="menuTitle" class="big menutitle" text="MORPHAGE"/>
             <ui:VisualElement class="menucard">
-                <ui:Button name="beginBtn" text="Begin Run ▸" class="btn"/>
+                <ui:Button name="beginBtn" text="Begin Run" class="btn"/>
                 <ui:VisualElement class="togglerow">
                     <ui:Button name="gameModeBtn" text="Game Mode" class="toggle"/>
                     <ui:Button name="settingsBtn" text="Settings" class="toggle"/>

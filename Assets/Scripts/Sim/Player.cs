@@ -131,6 +131,7 @@ namespace Mutagen
             mv.exec(this, game, lvl);
             moveCd[id] = mv.cd * CdMul() * (1f - 0.06f * (lvl - 1));
             gcd = 0.2f; Sfx.Cast();
+            if (!isBot) game.tutorial.OnMoveUsed(); // onboarding hook (no-op unless the tutorial is live)
         }
 
         // ---------------------------------------------------------------- move helpers
@@ -411,6 +412,7 @@ namespace Mutagen
             _dashVel = new Vector2(dx * 640f, dy * 640f); dashTime = 0.14f; invuln = 0.22f; dashing = true; chargeDmg = 0f;
             dashCdMax = 1.3f * (stormborn ? 0.5f : 1f) * SimMath.PowInt(0.9f, Stacks("wings"));
             dashCd = dashCdMax; Sfx.Dash(); Haptics.Light();
+            if (!isBot) game.tutorial.OnDashed(); // onboarding hook (no-op unless the tutorial is live)
             for (int i = 0; i < 8; i++)
                 game.AddParticle(x, y, -dx * Fx.Rand(20f, 80f), -dy * Fx.Rand(20f, 80f), .3f, Palette.Xp, 4f);
         }
