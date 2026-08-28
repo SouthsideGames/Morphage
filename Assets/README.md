@@ -1,20 +1,22 @@
-# MORPHAGE — Unity port of `mutant-arena.html`
+# MORPHAGE — mobile monster-evolution survivor (Unity 6 / URP-2D)
 
-Faithful Unity 6 / URP-2D port of the MUTAGEN prototype. The HTML
-(`/prototype/mutant-arena.html`) is the behavioral source of truth; this code
-mirrors its numbers. I (the "port system") keep them in sync: you send updated
-HTML, I diff it against the snapshot and bring the deltas across.
+> **Coming back to this project? Start with [docs/TODO.md](../docs/TODO.md)** — current status,
+> what's verified, and what to do first. This file is the setup + content-authoring reference.
 
-## First-time setup (one click)
+Started as a port of the `prototype/mutant-arena.html` prototype and has since grown well past it
+(4-slot move loadout, synergies, monster archive, meta-progression, online co-op). The HTML is
+history now, not a spec — the Unity code is the source of truth.
 
-There are **no committed `.asset` files** — they're generated so GUIDs are always
-correct and the numbers stay in code for easy HTML syncing.
+## First-time setup
 
-1. Open the project in Unity (6000.3.x).
-2. Menu: **MUTAGEN → Generate Assets** (creates mutation/enemy data + the UI PanelSettings).
-3. Press **Play**. The game self-bootstraps in any scene — no scene wiring needed.
+1. Open the project in Unity (**6000.3.9f1**).
+2. Press **Play**. The game self-bootstraps in any scene — no scene wiring needed.
+3. Only if Play logs "No data assets found" (or you edited the data tables): menu
+   **MUTAGEN → Generate Assets**, which regenerates the mutation/enemy data + UI PanelSettings
+   into `Assets/Resources/`.
 
-If Play logs "No data assets found", you skipped step 2.
+The generated `.asset` files **are committed** now; the canonical numbers still live in code
+(`Assets/Editor/AssetGenerator.cs`) so the generator can rebuild them at any time.
 
 > **Project setting:** Edit → Project Settings → Player → *Active Input Handling*
 > must include the **Input System Package** (New or Both). The port uses it directly.
@@ -27,8 +29,9 @@ If Play logs "No data assets found", you skipped step 2.
 - **Dash:** Shift / left shoulder — i-frames; cooldown shortened by Wings/Stormborn.
 - **Draft:** 1 / 2 / 3 or click. Re-drafting a move levels it (max 3 → evolves). A 5th move opens a
   **forget** prompt (keys 1-3 overwrite a slot, 4 = discard).  **Reroll:** R / button (+1 per boss).
-- **Menu:** Campaign (15 waves → final boss → Victory) / Endless, and **Auto-cast** (fire all off-cooldown moves).
-- **Debug:** `` ` ``.  **Mute:** M.
+- **Menu:** Game Mode (Campaign — 15 waves → final boss → Victory — or Endless, plus **Host / Join /
+  Quick Match** for online co-op), Settings, Synergies codex, Monsters archive, and the unlock **Shop**.
+- **Debug:** `Tab` (or triple-tap the title on a device; gated by Developer Mode there).  **Mute:** M.
 
 ## Mobile / touch controls (native UI Toolkit)
 
@@ -50,54 +53,70 @@ build/sign in Xcode / Android Studio. Player orientation is already landscape.
 
 ## Project layout
 
+> The old `Assets/MUTAGEN/` tree no longer exists. Code lives in `Assets/Scripts/`, generated data in
+> `Assets/Resources/`, editor tools in `Assets/Editor/`.
+
 ```
-Assets/MUTAGEN/
-  Scripts/
-    Core/      Rng, Pool, SpatialGrid
-    Data/      MutationDef, EnemyDef (ScriptableObjects), MutationEffects, MutationManager
-    Sim/       Player, Clone, Enemy, Projectile, DNAOrb, Particle, Floater, Beam, Palette, Fx
-    UI/        UIManager (UI Toolkit)
-    Game.cs        state machine, fixed-timestep loop, waves, spawning, pooling, render-sync
-    InputReader.cs single-stick + ability input
-    Sfx.cs         synthesized SFX (no audio assets)
-    Rendering.cs   runtime circle-sprite factory + pooled views
-    Bootstrap.cs   auto-spawns Game on Play
-  Editor/      AssetGenerator.cs  ← canonical numbers + asset generation (the sync point)
-  Resources/
-    Mutations/ Enemies/   generated SO assets
-    UI/        MutagenUI.uxml/.uss (authored) + generated PanelSettings/theme
+Assets/Scripts/
+  Core/      Rng, SimMath, SaveSystem, MetaProgress, GameSettings, DevMode, Tutorial,
+             BalanceSim, Pool, SpatialGrid, TouchInput, Haptics, Binds
+  Data/      MutationDef, EnemyDef (ScriptableObjects), Moves, MutationEffects,
+             MutationManager, Synergies, MonsterRecord
+  Sim/       Player, Clone, Enemy, Projectile, Hazard, DNAOrb, Particle, Floater, Beam, Palette, Fx
+  Net/       CoopNet (sessions/host/join), CoopSync (lockstep), TickInput (wire packet)
+  UI/        UIManager (UI Toolkit — HUD, overlays, draft, codex, gallery, shop)
+  Game.cs        state machine, fixed-timestep loop, waves, spawning, pooling, render-sync
+  InputReader.cs movement + ability input, routed through the tick queue
+  Sfx.cs         synthesized SFX (no audio assets)
+  Rendering.cs   runtime circle-sprite factory + pooled views
+  PlayerVisual.cs / MonsterPortrait.cs / Vfx.cs / Juice.cs
+  Bootstrap.cs   auto-spawns Game on Play
+
+Assets/Editor/    AssetGenerator.cs  ← canonical numbers + asset generation
+                  MetaProgressTest.cs, IosPostBuild.cs
+Assets/Resources/ Mutations/ Enemies/   generated SO assets (committed)
+                  UI/  MutagenUI.uxml/.uss + per-item templates, fonts, PanelSettings
 ```
+
+Full annotated map, including which files are newest and least tested:
+[docs/TODO.md §6](../docs/TODO.md).
 
 ## How to add / change a mutation
 
-1. **Data:** add a row to `AssetGenerator.Mutations` (id, order, name, color, repeatable,
-   maxStacks, description), then re-run **MUTAGEN → Generate Assets**.
-2. **Effect:** add a `case "id":` in `MutationEffects.Apply` (stat tweaks) and/or runtime
-   behavior in `Player` (for active abilities like fire/laser).
+1. **Data:** add a row to `AssetGenerator.Mutations` (id, order, name, color, **rarity**, move,
+   repeatable, maxStacks, description, evolveName), then re-run **MUTAGEN → Generate Assets**.
+   Rarity also decides shop gating: commons are free, rares/legendaries must be unlocked.
+2. **Effect:** for a move, add an entry in `Data/Moves.cs` + an attack helper in `Sim/Player.cs`.
+   For a modifier, add a `case "id":` in `MutationEffects.Apply` (and `Evolve`).
    Enemies work the same way via `AssetGenerator.Enemies` + behavior flags.
+3. **Visual (optional but wanted):** procedural body part in `PlayerVisual.cs` — silhouette, skin
+   tint, accent mote, or move-tell nub depending on the mutation type.
 
 The HUD and draft cards are fully data-driven — no UXML changes needed.
 
-## Deviations from the prototype (intentional)
+⚠️ Anything that affects the simulation must stay deterministic (seeded `Rng`, `SimMath` for trig)
+or online co-op desyncs. See [docs/TODO.md §4](../docs/TODO.md).
 
-1. **Move loadout (v0.4):** Combat is a 4-slot move loadout (keys 1-4), no auto-attack. Moves live in
-   a code table (`Moves.cs`, exec delegates → `Player` helpers); draftable moves/modifiers are SOs.
-2. **Settings (menu → ⚙):** rebindable keys (`Binds.cs`; click a key, press the new one) and an audio
-   mixer — Master/Music/SFX sliders + ambient music (drone + sparse melody). Binds are in-memory (reset on reload).
-2. **Bounded 960×600 arena, camera frames it.** v0.2 is `arena == screen`; every number is
-   tuned to that box. The notes' "follow camera / open world" is a design *evolution* — switch
-   the camera when the HTML evolves.
-3. **Visuals.** Floor grid + border and the procedural creature (body, glow, eyes, per-stack arms,
-   wings, spiked tail, thick rim, poison aura, fire/laser tint) are ported (`PlayerVisual.cs`,
-   `SpriteFactory.MakeFloor`). Enemies are still glowing circles + health bars (their prototype art
-   is also circles). All gameplay numbers are exact.
-4. **Determinism scope.** Seeded RNG drives run composition (spawn type/side, draft, enemy fire
-   timing); cosmetic randomness (particle scatter) is off the seeded stream. This matches the
-   prototype's actual guarantee ("seeds fix spawn composition + draft order"). The fixed
-   timestep is in place; full frame-exact determinism (single seeded stream for *all* draws) is
-   a later tightening.
+## Design notes / how it grew past the prototype
 
-## Deferred (ponytail-flagged, add when needed)
+1. **Move loadout.** Combat is a 4-slot move loadout (no auto-attack). Moves live in a code table
+   (`Moves.cs`, exec delegates → `Player` helpers); draftable moves/modifiers are ScriptableObjects.
+   19 moves + 20 modifiers, with evolves and 17 synergies (`Data/Synergies.cs`).
+2. **Settings** are mobile-shaped: sound, vibration, screen shake, auto-cast, reduced FX, left-handed
+   layout, clear archive — all persisted (`Core/GameSettings.cs`). The old rebindable-keys UI was
+   removed; `Binds.cs` remains for desktop defaults.
+3. **Arena is screen-fit per device**, not a fixed 960×600 box, and the camera frames it. In co-op the
+   joiner adopts the **host's** arena size — two differently-shaped screens would otherwise simulate
+   different arenas (this was a real desync).
+4. **Visuals** are fully procedural: floor grid + border, and a creature where every one of the 39
+   mutations leaves a persistent mark (silhouette geometry, skin tint, orbiting accent motes, move-tell
+   nubs) — see `PlayerVisual.cs`. Enemies are still glowing circles + health bars.
+5. **Determinism is now a hard requirement, not a nicety** — it's what makes lockstep co-op work.
+   Seeded `Rng` drives everything in the sim; cosmetic randomness (`Fx`) is off that stream; gameplay
+   trig/pow goes through `Core/SimMath.cs` so iOS and Android agree bit-for-bit. Verified same-seed
+   and cross-platform. The rules to honor are listed in [docs/TODO.md §4](../docs/TODO.md).
+
+## Deferred (add when needed)
 
 - View interpolation (sim runs 60 Hz; add if high-refresh stutter shows).
 - asmdefs for faster incremental compiles (currently Assembly-CSharp).
