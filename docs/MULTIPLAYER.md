@@ -1,5 +1,7 @@
 # Morphage — Multiplayer Readiness & Plan
 
+*Project paused 2026-07-03. Coming back cold? Read [TODO.md](TODO.md) first — this file is the co-op deep dive.*
+
 > Status: **online co-op WORKING CROSS-PLATFORM — verified iPhone ↔ Android (2026-07-02).** Two
 > players connect by share code, each drives their own hero, full lockstep sync holds through
 > combat + level-ups with no desync — including MIXED-PLATFORM matches (the SimMath deterministic
@@ -75,6 +77,11 @@
 - **Still TODO (all non-blocking polish):** resync fallback (auto-recover — deprioritized: no desyncs observed
   on device); rematch UX without app restart; compact non-blocking card panel; co-op reroll; loadout-full
   replace flow; W/L record on menu; iPad letterboxes the host-shaped arena (cosmetic).
+- **Landed AFTER this doc was written (2026-07-03) — meta-progression.** `Core/MetaProgress.cs` adds an
+  Essence currency + an unlock shop that **narrows the seeded draft pool**. That would desync two peers
+  with different unlocks, so the gate (`MetaProgress.Enforce`) is **true only in solo play**; co-op and
+  the headless/balance harnesses force the full pool. Keep that invariant if you touch draft filtering.
+  Untested in play — see [TODO.md](TODO.md) §2.
 
 ---
 
@@ -246,7 +253,7 @@ Build as a **local loopback first** (both players driven locally, no networking)
 
 ---
 
-## 7. Staged sequence
+## 7. Staged sequence (HISTORICAL — all stages are done; kept for context)
 
 - **Stage 0 — determinism (✅ VERIFIED) + 2-players-on-one-device loopback.** The same-seed-twice
   checksum harness is built (`Game.Checksum` / `Game.RunDeterminismCheck`, debug-panel "Determinism"
@@ -278,7 +285,7 @@ Testing harness throughout: **Multiplayer Play Mode** (two virtual players in on
 | Cosmetic-only RNG (keep gameplay off this) | `Assets/Scripts/Sim/Fx.cs` |
 | Draft / mutation selection | `Assets/Scripts/Data/MutationManager.cs` |
 | HUD / draft / overlays | `Assets/Scripts/UI/UIManager.cs` |
-| New netcode code goes here | `Assets/Scripts/Net/` (to be created) |
+| Netcode (built) | `Assets/Scripts/Net/` — CoopNet, CoopSync, TickInput |
 
 ## Two easiest-to-underestimate items
 1. **Owner attribution** (projectiles + `Enemy.Hurt` `src`) — touches many call sites and is
